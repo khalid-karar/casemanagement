@@ -27,10 +27,11 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const USERS = ['hr-mgr', 'hr-inv', 'hr-dir', 'client-admin', 'counsel', 'editor', 'verifier'];
 const BACKOFFICE = ['editor', 'verifier'];
+const isBack = () => Auth.mode === 'oidc' ? Auth.me.tenantId === 'platform' : BACKOFFICE.includes(user);
 
 async function api(method, path, body) {
   const r = await fetch(path + (path.includes('?') ? '&' : '?') + 'lang=' + lang, {
-    method, headers: { authorization: 'Bearer dev:' + user, 'content-type': 'application/json' },
+    method, headers: { authorization: Auth.header(user), 'content-type': 'application/json' },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const j = await r.json().catch(() => ({}));
@@ -45,10 +46,11 @@ function chrome() {
   $('#appTitle').textContent = t('app');
   document.querySelector('[data-i=user]').textContent = t('user');
   $('#langBtn').textContent = lang === 'ar' ? 'English' : 'العربية';
-  $('#user').innerHTML = USERS.map((u) => `<option value="${u}" ${u === user ? 'selected' : ''}>${u}</option>`).join('');
-  if (BACKOFFICE.includes(user) && tab !== 'review' && tab === 'cases') tab = 'review';
-  if (!BACKOFFICE.includes(user) && tab === 'review') tab = 'cases';
-  $('#tabs').innerHTML = (BACKOFFICE.includes(user) ? [['review', 'tabReview'], ['laws', 'tabLaws']] : [['cases', 'tabCases'], ['laws', 'tabLaws'], ['ai', 'tabAi']])
+  if (Auth.mode === 'oidc') { $('#user').parentElement.hidden = true; $('#who').innerHTML = `${esc(Auth.me.name)} <button id="outBtn" type="button">${lang === 'ar' ? 'خروج' : 'Sign out'}</button>`; $('#outBtn').onclick = Auth.logout; }
+  else $('#user').innerHTML = USERS.map((u) => `<option value="${u}" ${u === user ? 'selected' : ''}>${u}</option>`).join('');
+  if (isBack() && tab !== 'review' && tab === 'cases') tab = 'review';
+  if (!isBack() && tab === 'review') tab = 'cases';
+  $('#tabs').innerHTML = (isBack() ? [['review', 'tabReview'], ['laws', 'tabLaws']] : [['cases', 'tabCases'], ['laws', 'tabLaws'], ['ai', 'tabAi']])
     .map(([k, n]) => `<button class="${tab === k ? 'on' : ''}" data-tab="${k}">${t(n)}</button>`).join('');
 }
 
@@ -122,7 +124,7 @@ async function viewReview() {
   $('#vf').onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
     const fd = new FormData(); fd.append('file', f);
-    const r = await fetch('/laws/files?lang=' + lang, { method: 'POST', headers: { authorization: 'Bearer dev:' + user }, body: fd });
+    const r = await fetch('/laws/files?lang=' + lang, { method: 'POST', headers: { authorization: Auth.header(user) }, body: fd });
     const j = await r.json();
     if (!r.ok) return alert(`${t('err')}: ${j.error}`);
     $('#vt').value = j.text; fileSha = j.sha256;
@@ -176,5 +178,5 @@ document.addEventListener('click', (e) => {
   const tb = e.target.closest('[data-tab]'); if (tb) { tab = tb.dataset.tab; openId = null; render(); }
 });
 $('#langBtn').onclick = () => { lang = lang === 'ar' ? 'en' : 'ar'; localStorage.setItem('lang', lang); render(); };
-$('#user').onchange = (e) => { user = e.target.value; localStorage.setItem('user', user); openId = null; render(); };
-render();
+if ($('#user').tagName === 'SELECT') $('#user').onchange = (e) => { user = e.target.value; localStorage.setItem('user', user); openId = null; render(); };
+Auth.init().then(render);

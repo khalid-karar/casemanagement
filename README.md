@@ -14,3 +14,6 @@ Multi-tenant, Arabic-first case management for Saudi corporates: HR, Security, A
 `pnpm install && pnpm typecheck && pnpm test`
 
 Not yet built: identity (Keycloak/Nafath), Najiz integration, job queue, eval tasks (`pnpm eval:ai` has no tasks yet).
+
+## Sign-in
+Run locally with `pnpm start:dev` (demo user switcher, `AUTH_MODE=dev`). Real deployments use Keycloak (`AUTH_MODE=oidc`); see docs/KEYCLOAK.md. The server refuses to start without an explicit mode, and refuses dev mode in production.

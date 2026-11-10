@@ -10,11 +10,13 @@
     "test:watch": "vitest",
     "eval:ai": "echo 'eval harness not yet implemented'",
     "start": "tsx src/api/server.ts",
-    "migrate": "tsx src/db/migrate.ts"
+    "migrate": "tsx src/db/migrate.ts",
+    "start:dev": "AUTH_MODE=dev tsx src/api/server.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.6",
     "hono": "^4.13.17",
+    "jose": "^6.2.17",
     "mammoth": "^1.13.0",
     "pg": "^8.23.1",
     "unpdf": "^2.1.0",

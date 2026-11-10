@@ -16,7 +16,11 @@ import { CONSENT_VERSION, answerFromLaws, answerQuestion, consentHash, consentTe
 import type { AiProviders, ChatProvider, InKingdomProvider } from '../ai';
 
 export interface AppDeps {
-  repo: Repo; paidOcr?: VisionOcr; directory: Directory;
+  repo: Repo; paidOcr?: VisionOcr;
+  /** Resolves a verified Principal from an Authorization header (dev Directory or OIDC). */
+  directory: { resolve(header: string | undefined): Principal | undefined | Promise<Principal | undefined> };
+  /** Public sign-in settings for the web app. */
+  authInfo?: { mode: 'dev' | 'oidc'; issuer?: string; clientId?: string };
   /** Our own (sovereign) model. */
   provider?: ChatProvider;
   /** External in-Kingdom provider, usable only for tenants with a valid signed consent. */
@@ -38,7 +42,7 @@ const T = {
 const pickLang = (q: string | undefined, h: string | undefined): 'ar' | 'en' =>
   q === 'en' || (!q && /^en/i.test(h ?? '')) ? 'en' : 'ar';
 
-const STATIC = new Set(['/', '/index.html', '/app.js', '/style.css', '/favicon.ico']);
+const STATIC = new Set(['/', '/index.html', '/app.js', '/auth.js', '/style.css', '/favicon.ico', '/auth/config']);
 
 export function createApp(deps: AppDeps) {
   const { repo, directory, paidOcr } = deps;
@@ -50,9 +54,14 @@ export function createApp(deps: AppDeps) {
     c.set('lang', pickLang(c.req.query('lang'), c.req.header('accept-language')));
     c.header('content-language', c.get('lang'));
     c.header('x-content-type-options', 'nosniff');
+    c.header('x-frame-options', 'DENY');
+    c.header('referrer-policy', 'no-referrer');
+    c.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
+    const idp = deps.authInfo?.issuer ? new URL(deps.authInfo.issuer).origin : '';
+    c.header('content-security-policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${idp}; frame-ancestors 'none'; base-uri 'none'; form-action 'self' ${idp}`.replace(/\s+;/g, ';'));
     c.header('cache-control', 'no-store');
     if (c.req.path === '/health' || STATIC.has(c.req.path)) return next();
-    const user = directory.resolve(c.req.header('authorization'));
+    const user = await directory.resolve(c.req.header('authorization'));
     if (!user) return c.json({ error: 'UNAUTHENTICATED', message: T.unauthenticated[c.get('lang')] }, 401);
     c.set('user', user);
     return next();
@@ -72,6 +81,8 @@ export function createApp(deps: AppDeps) {
     return c.json({ error: 'BAD_REQUEST', message: T.badRequest[lang] }, 400);
   });
 
+  app.get('/auth/config', (c) => c.json(deps.authInfo ?? { mode: 'dev' }));
+  app.get('/me', (c) => { const u = c.get('user'); return c.json({ id: u.id, name: u.name, tenantId: u.tenantId, roles: u.roles, departments: u.departments, kind: u.kind }); });
   app.get('/health', async (c) => c.json({ ok: true, ocr: await ocrAvailable(), paidOcrForPlatformLaw: Boolean(paidOcr) }));
 
   // Not-found and not-permitted look identical so existence is not leaked across walls.

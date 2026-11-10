@@ -14,6 +14,9 @@ importers:
       hono:
         specifier: ^4.13.17
         version: 4.13.17
+      jose:
+        specifier: ^6.2.17
+        version: 6.2.17
       mammoth:
         specifier: ^1.13.0
         version: 1.13.0
@@ -414,6 +417,9 @@ packages:
 
   isarray@1.0.0:
     resolution: {integrity: sha512-VLghIWNM6ELQzo7zwmcg0NmTVyWKYjvIeM83yjp0wRDTmUnrM678fQbcKBo6n2CJEF0szoG//ytg+TKla89ALQ==}
+
+  jose@6.2.17:
+    resolution: {integrity: sha512-wOuK9V1yujQFH5S0ZWmLcDZN7+IKh9bUCC2ZPCf2HDlol3WWHy+PPyNjEI75FXRLMp3vDKQcupP59xhVU95hcg==}
 
   jszip@3.10.2:
     resolution: {integrity: sha512-3l+rb15IOWtUhU0H5MFqES/T6Kh7abYwjosBey/vD6hDt8zoEffkSC5Ws5SGtgVw3gBx2NEbhTeSW1+kWkpyTQ==}
@@ -997,6 +1003,8 @@ snapshots:
   inherits@2.0.4: {}
 
   isarray@1.0.0: {}
+
+  jose@6.2.17: {}
 
   jszip@3.10.2:
     dependencies:

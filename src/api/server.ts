@@ -2,11 +2,16 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { createApp } from './app';
 import { Directory } from './auth';
+import { OidcAuthenticator } from './oidc';
 import { MemoryRepo } from './repo';
 import { PgRepo } from './pg-repo';
 import { openAICompatProvider } from '../ai';
 import { visionFromConfig } from '../legal';
 
+// Sign-in. Real deployments use OIDC (Keycloak). The dev directory exists only for local demos and is refused in production.
+const authMode = process.env.AUTH_MODE;
+if (authMode !== 'oidc' && authMode !== 'dev') throw new Error("Set AUTH_MODE to 'oidc' (real sign-in) or 'dev' (local demo only)");
+if (authMode === 'dev' && process.env.NODE_ENV === 'production') throw new Error('AUTH_MODE=dev is not allowed when NODE_ENV=production');
 const directory = new Directory();
 const repo = process.env.DATABASE_URL
   ? await PgRepo.connect(process.env.DATABASE_URL)
@@ -16,6 +21,7 @@ const repo = process.env.DATABASE_URL
 const T = '00000000-0000-0000-0000-000000000001';
 const u = (id: string, name: string, departments: any, roles: string[], clearance: any = 'RESTRICTED', tenantId = T) =>
   directory.add({ id, name, kind: 'human', tenantId, departments, roles, reportsTo: [], clearance });
+if (authMode === 'dev') {
 u('hr-mgr', 'HR Manager', ['HR'], ['hr_intake', 'hr_manager']);
 u('hr-inv', 'HR Investigator', ['HR'], ['hr_investigator']);
 u('hr-dir', 'HR Director', ['HR'], ['hr_director']);
@@ -23,6 +29,7 @@ u('client-admin', 'Client Admin', ['HR'], ['tenant_admin']);
 u('counsel', 'In-house Counsel', ['LEGAL'], ['legal_counsel', 'general_counsel'], 'PRIVILEGED');
 u('editor', 'Legal Content Editor', ['LEGAL'], ['legal_content_editor'], 'RESTRICTED', 'platform');
 u('verifier', 'Legal Verifier (Counsel)', ['LEGAL'], ['legal_verifier'], 'RESTRICTED', 'platform');
+}
 
 // Sovereign model (own GPU). Optional: leave LLM_BASE_URL unset until a client needs own-model-only.
 const baseUrl = process.env.LLM_BASE_URL;
@@ -53,7 +60,21 @@ const paidOcr = process.env.PAID_OCR_API_KEY
       apiKey: process.env.PAID_OCR_API_KEY,
     })
   : undefined;
-const app = createApp({ repo, directory, ...(provider ? { provider } : {}), ...(inKingdom ? { inKingdom } : {}), ...(paidOcr ? { paidOcr } : {}) });
+let authn: { resolve: (h: string | undefined) => any } = directory;
+let authInfo: { mode: 'dev' | 'oidc'; issuer?: string; clientId?: string } = { mode: 'dev' };
+if (authMode === 'oidc') {
+  const issuer = process.env.OIDC_ISSUER;
+  if (!issuer) throw new Error('OIDC_ISSUER is required');
+  const clientId = process.env.OIDC_CLIENT_ID ?? 'case-web';
+  authn = new OidcAuthenticator({
+    issuer,
+    audience: process.env.OIDC_AUDIENCE ?? 'case-api',
+    allowedClients: (process.env.OIDC_ALLOWED_CLIENTS ?? clientId).split(','),
+    allowInsecureIssuer: process.env.OIDC_ALLOW_INSECURE_ISSUER === 'true' && process.env.NODE_ENV !== 'production',
+  });
+  authInfo = { mode: 'oidc', issuer, clientId };
+}
+const app = createApp({ repo, directory: authn, authInfo, ...(provider ? { provider } : {}), ...(inKingdom ? { inKingdom } : {}), ...(paidOcr ? { paidOcr } : {}) });
 app.use('/*', serveStatic({ root: './web' }));
 const port = Number(process.env.PORT ?? 3000);
 serve({ fetch: app.fetch, port });
