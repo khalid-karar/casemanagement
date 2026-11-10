@@ -13,6 +13,7 @@
     "migrate": "tsx src/db/migrate.ts",
     "start:dev": "AUTH_MODE=dev tsx src/api/server.ts",
     "seed": "tsx scripts/seed.mts",
+    "crypto": "tsx scripts/crypto-admin.mts",
     "gen:realm": "tsx scripts/gen-realm.mts deploy/keycloak/cms-realm.json",
     "gen:realm:qa": "tsx scripts/gen-realm.mts deploy/keycloak/cms-realm-qa.json --qa"
   },

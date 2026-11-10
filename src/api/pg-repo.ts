@@ -10,6 +10,8 @@ import { defaultSettings } from '../ai/consent';
 
 const LEGAL_LOCK = 7001;
 
+import type { TenantKey } from '../security/crypto';
+
 export class PgRepo implements Repo {
   private constructor(private pool: pg.Pool) {}
 
@@ -135,6 +137,14 @@ export class PgRepo implements Repo {
       const r = (await c.query('SELECT sha256, name, mime, bytes, uploaded_by, uploaded_at FROM case_documents WHERE tenant_id = $1 AND case_id = $2 AND sha256 = $3', [tenantId, caseId, sha256])).rows[0];
       return r ? { sha256: String(r.sha256).trim(), name: r.name, mime: r.mime, bytes: new Uint8Array(r.bytes), uploadedBy: r.uploaded_by, uploadedAt: r.uploaded_at } as CaseDocument : undefined;
     });
+  }
+
+  getTenantKeys(tenantId: string) {
+    return this.run(tenantId, async (c) => (await c.query('SELECT version, master_key_id, wrapped, created_at FROM tenant_keys WHERE tenant_id = $1 ORDER BY version', [tenantId])).rows
+      .map((r) => ({ version: Number(r.version), masterKeyId: r.master_key_id, wrapped: r.wrapped, createdAt: r.created_at }) as TenantKey));
+  }
+  putTenantKey(tenantId: string, k: TenantKey) {
+    return this.run(tenantId, async (c) => (await c.query('INSERT INTO tenant_keys (tenant_id, version, master_key_id, wrapped, created_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING', [tenantId, k.version, k.masterKeyId, k.wrapped, k.createdAt])).rowCount === 1);
   }
 
   getAiSettings(tenantId: string) {

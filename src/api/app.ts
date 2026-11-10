@@ -9,6 +9,7 @@ import { Directory } from './auth';
 import type { Repo, Tx } from './repo';
 import { RateLimiter, isHeavyRoute } from './ratelimit';
 import { CASE_TYPES } from '../case-types';
+import { CryptoError } from '../security/crypto';
 import { FileError, LegalError, extractProposals, extractText } from '../legal';
 import { MAX_BYTES } from '../legal/files';
 import { ARTIFACT_TYPE, describeUpload, safeName } from './documents';
@@ -114,6 +115,8 @@ export function createApp(deps: AppDeps) {
     if (err instanceof FileError) return c.json({ error: err.code, message: T.badRequest[lang] }, err.code === 'FILE_TOO_LARGE' ? 413 : err.code === 'OCR_NOT_INSTALLED' ? 503 : 400);
     if (err instanceof LegalError) return c.json({ error: err.code, message: T.forbidden[lang] }, err.code === 'UNKNOWN_VERSION' || err.code === 'UNKNOWN_INSTRUMENT' ? 404 : 403);
     if ((err as { code?: string }).code === '23505' || (err as Error).message === 'CASE_EXISTS') return c.json({ error: 'CASE_EXISTS', message: T.badRequest[lang] }, 409);
+    // Stored data could not be decrypted (wrong/missing key, tampering): fail closed, say nothing about why.
+    if (err instanceof CryptoError) { console.error(`decryption failure: ${err.code}`); return c.json({ error: 'SERVER_ERROR', message: T.badRequest[lang] }, 500); }
     // Never leak internals.
     return c.json({ error: 'BAD_REQUEST', message: T.badRequest[lang] }, 400);
   });

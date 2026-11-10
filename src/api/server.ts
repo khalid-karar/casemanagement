@@ -6,6 +6,8 @@ import { Directory } from './auth';
 import { OidcAuthenticator } from './oidc';
 import { MemoryRepo } from './repo';
 import { PgRepo } from './pg-repo';
+import { DataCrypto, MasterKeys } from '../security/crypto';
+import { EncryptedRepo } from '../security/encrypted-repo';
 import { openAICompatProvider } from '../ai';
 import { visionFromConfig } from '../legal';
 import { TEST_USERS, asPrincipal } from './test-users';
@@ -15,9 +17,17 @@ const authMode = process.env.AUTH_MODE;
 if (authMode !== 'oidc' && authMode !== 'dev') throw new Error("Set AUTH_MODE to 'oidc' (real sign-in) or 'dev' (local demo only)");
 if (authMode === 'dev' && process.env.NODE_ENV === 'production') throw new Error('AUTH_MODE=dev is not allowed when NODE_ENV=production');
 const directory = new Directory();
-const repo = process.env.DATABASE_URL
+const baseRepo = process.env.DATABASE_URL
   ? await PgRepo.connect(process.env.DATABASE_URL)
   : (console.warn('DATABASE_URL not set: using in-memory storage. Data is lost on restart.'), new MemoryRepo());
+// Encryption at rest for sensitive fields, parties, artifact contents and stored documents (docs/ENCRYPTION.md).
+// Production refuses to start without a master key, unless plaintext storage is explicitly accepted.
+const masterKeys = MasterKeys.fromEnv(process.env);
+if (!masterKeys && process.env.NODE_ENV === 'production' && process.env.ALLOW_PLAINTEXT_STORAGE !== 'true') {
+  throw new Error('DATA_MASTER_KEYS (or DATA_MASTER_KEYS_FILE) is required in production. Set ALLOW_PLAINTEXT_STORAGE=true only to knowingly run without encryption at rest.');
+}
+if (!masterKeys) console.warn('No DATA_MASTER_KEYS: sensitive data is stored UNENCRYPTED. Do not use this way with real data.');
+const repo = masterKeys ? new EncryptedRepo(baseRepo, new DataCrypto(masterKeys, baseRepo)) : baseRepo;
 
 // Demo users for local development and QA only. The same matrix becomes the QA Keycloak realm
 // (`pnpm gen:realm:qa`), so a wall proved here is the same wall proved through real sign-in.
