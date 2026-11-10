@@ -28,7 +28,7 @@ async function sqlAs(tenant: string | null, text: string, params: unknown[] = []
   await c.connect();
   try {
     await c.query('BEGIN');
-    if (tenant !== null) await c.query("SELECT set_config('app.tenant_id', $1, true)", [tenant]);
+    if (tenant !== null) await c.query("SELECT set_config('app.tenant_id', $1, true), set_config('app.scope', 'full', true)", [tenant]);
     const r = await c.query(text, params);
     await c.query('COMMIT');
     return r;
@@ -145,6 +145,7 @@ describe.skipIf(!PG_ENABLED)('Postgres', () => {
   // NOT RUN in the build environment (no PostgreSQL server there): run with TEST_ADMIN_URL / TEST_APP_URL set.
   it('stores case documents per tenant, append-only, behind row-level security', async () => {
     const repo = await newRepo();
+    await call(appFor(repo), 'mgr', 'POST', '/cases', { id: 'c1', caseType: 'hr.misconduct', fields: {} }); // a document belongs to a visible case
     const doc = { sha256: 'a'.repeat(64), name: 'f.pdf', mime: 'application/pdf', bytes: new Uint8Array([1, 2, 3]), uploadedBy: 'mgr', uploadedAt: clock() };
     await repo.putCaseDocument(T1, 'c1', doc);
     await repo.putCaseDocument(T1, 'c1', doc); // idempotent

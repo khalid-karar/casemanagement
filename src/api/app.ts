@@ -164,7 +164,7 @@ export function createApp(deps: AppDeps) {
     for (let attempt = 0; attempt < 5; attempt++) {
       const id = b.id || gen();
       const m = createCase(def, { id, fields: b.fields ?? {}, parties: b.parties ?? [] }, user, now());
-      try { await repo.tx(user.tenantId, (tx) => tx.saveCase(m.case, m.event, true)); return c.json(view(m.case, user), 201); }
+      try { await repo.tx(user, (tx) => tx.saveCase(m.case, m.event, true)); return c.json(view(m.case, user), 201); }
       catch (e) { if (b.id || !((e as { code?: string }).code === '23505' || (e as Error).message === 'CASE_EXISTS')) throw e; }
     }
     return c.json({ error: 'CASE_EXISTS' }, 409);
@@ -172,7 +172,7 @@ export function createApp(deps: AppDeps) {
 
   app.get('/cases', async (c) => {
     const user = c.get('user');
-    const all = await repo.tx(user.tenantId, (tx) => tx.listCases());
+    const all = await repo.tx(user, (tx) => tx.listCases());
     return c.json(all.filter((x) => canAccess(user, x, 'read').allowed).map((x) => view(x, user)));
   });
 
@@ -180,7 +180,7 @@ export function createApp(deps: AppDeps) {
   app.get('/cases/search', async (c) => {
     const user = c.get('user');
     const q = c.req.query();
-    const all = await repo.tx(user.tenantId, (tx) => tx.listCases());
+    const all = await repo.tx(user, (tx) => tx.listCases());
     return c.json(searchCases(all, user, CASE_TYPES, now(), {
       q: q['q'] ?? '', state: q['state'] ?? '', dept: q['dept'] ?? '', type: q['type'] ?? '', mine: q['mine'] === '1', open: q['open'] === '1', overdue: q['overdue'] === '1', due: Number(q['due']) || 0, needsAction: q['needs'] === '1',
       sort: q['sort'] ?? 'updated', order: q['order'] === 'asc' ? 'asc' : 'desc', page: Number(q['page']) || 1, pageSize: Number(q['pageSize']) || 20,
@@ -188,13 +188,13 @@ export function createApp(deps: AppDeps) {
   });
   app.get('/dashboard', async (c) => {
     const user = c.get('user');
-    const all = await repo.tx(user.tenantId, (tx) => tx.listCases());
+    const all = await repo.tx(user, (tx) => tx.listCases());
     return c.json(buildDashboard(all, user, CASE_TYPES, now()));
   });
 
   app.get('/cases/:id', async (c) => {
     const user = c.get('user');
-    const cs = await repo.tx(user.tenantId, (tx) => load(tx, c.req.param('id'), user));
+    const cs = await repo.tx(user, (tx) => load(tx, c.req.param('id'), user));
     if (!cs) return nf(c);
     const def = CASE_TYPES[cs.caseTypeKey]!;
     const actions = def.transitions
@@ -210,7 +210,7 @@ export function createApp(deps: AppDeps) {
   app.post('/cases/:id/transitions/:action', async (c) => {
     const user = c.get('user');
     // Row lock: two people acting on one case are serialised, so guards always see the latest state.
-    const out = await repo.tx(user.tenantId, async (tx) => {
+    const out = await repo.tx(user, async (tx) => {
       const cs = await load(tx, c.req.param('id'), user, 'transition', true);
       if (!cs) return undefined;
       const m = applyTransition(CASE_TYPES[cs.caseTypeKey]!, cs, c.req.param('action'), user, now());
@@ -224,7 +224,7 @@ export function createApp(deps: AppDeps) {
     async (c: any) => {
       const user = c.get('user') as Principal;
       const body = await c.req.json().catch(() => ({}));
-      const out = await repo.tx(user.tenantId, async (tx) => {
+      const out = await repo.tx(user, async (tx) => {
         const cs = await load(tx, c.req.param('id'), user, action, true);
         if (!cs) return undefined;
         const m = fn(cs, user, body, c);
@@ -244,7 +244,7 @@ export function createApp(deps: AppDeps) {
 
   app.get('/cases/:id/audit', async (c) => {
     const user = c.get('user');
-    const r = await repo.tx(user.tenantId, async (tx) => {
+    const r = await repo.tx(user, async (tx) => {
       const cs = await load(tx, c.req.param('id'), user);
       return cs ? tx.getAudit(cs.id) : undefined;
     });
@@ -264,10 +264,10 @@ export function createApp(deps: AppDeps) {
     const d = describeUpload(bytes);
     const name = safeName(f.name);
     const caseId = c.req.param('id');
-    const found = await repo.tx(user.tenantId, (tx) => load(tx, caseId, user, 'write'));
+    const found = await repo.tx(user, (tx) => load(tx, caseId, user, 'write'));
     if (!found) return nf(c);
-    await repo.putCaseDocument(user.tenantId, caseId, { sha256: d.sha256, name, mime: d.mime, bytes, uploadedBy: user.id, uploadedAt: now() });
-    const out = await repo.tx(user.tenantId, async (tx) => {
+    await repo.putCaseDocument(user, caseId, { sha256: d.sha256, name, mime: d.mime, bytes, uploadedBy: user.id, uploadedAt: now() });
+    const out = await repo.tx(user, async (tx) => {
       const cs = await load(tx, caseId, user, 'write', true);
       if (!cs) return undefined;
       const m = addArtifact(cs, { id: `${type}-${d.sha256.slice(0, 16)}`, type, hash: d.sha256, payload: { name, mime: d.mime, size: d.size } }, user, now());
@@ -282,9 +282,9 @@ export function createApp(deps: AppDeps) {
     if (!/^[0-9a-f]{64}$/.test(sha)) return nf(c);
     // 'write' access, not 'read': audit-assurance read-across covers the redacted case view, never the document bytes
     // (an exhibit can contain exactly what redaction hides, such as a reporter's name).
-    const cs = await repo.tx(user.tenantId, (tx) => load(tx, c.req.param('id'), user, 'write'));
+    const cs = await repo.tx(user, (tx) => load(tx, c.req.param('id'), user, 'write'));
     if (!cs || !cs.artifacts.some((a) => a.hash === sha)) return nf(c); // only documents the case actually references
-    const doc = await repo.getCaseDocument(user.tenantId, cs.id, sha);
+    const doc = await repo.getCaseDocument(user, cs.id, sha);
     if (!doc) return nf(c);
     return new Response(new Blob([Buffer.from(doc.bytes)]), { headers: { 'content-type': doc.mime, 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(doc.name)}`, 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'no-store' } });
   });
@@ -303,7 +303,7 @@ export function createApp(deps: AppDeps) {
 
   app.get('/cases/:id/najiz', async (c) => {
     const user = c.get('user');
-    const cs = await repo.tx(user.tenantId, (tx) => load(tx, c.req.param('id'), user, 'write'));
+    const cs = await repo.tx(user, (tx) => load(tx, c.req.param('id'), user, 'write'));
     if (!cs || cs.caseTypeKey !== 'legal.matter') return nf(c);
     const nz = najizFor(user.tenantId);
     if (!nz) return c.json({ enabled: false });
@@ -322,7 +322,7 @@ export function createApp(deps: AppDeps) {
     if (!nz.gw.configured) return najizNotReady(c);
     const caseId = c.req.param('id');
     // Step 1 (locked): check every rule, build the packet from the allowlist, and COMMIT the attempt before anything is sent.
-    const prep = await repo.tx(user.tenantId, async (tx) => {
+    const prep = await repo.tx(user, async (tx) => {
       const cs = await load(tx, caseId, user, 'write', true);
       if (!cs) return undefined;
       const def = CASE_TYPES[cs.caseTypeKey]!;
@@ -335,7 +335,7 @@ export function createApp(deps: AppDeps) {
     if (!prep) return nf(c);
     const attachments = [];
     for (const a of prep.plan.packet.attachments) {
-      const doc = await repo.getCaseDocument(user.tenantId, caseId, a.sha256);
+      const doc = await repo.getCaseDocument(user, caseId, a.sha256);
       if (!doc) { attachments.length = 0; break; }
       attachments.push({ ...a, bytes: doc.bytes });
     }
@@ -347,7 +347,7 @@ export function createApp(deps: AppDeps) {
       catch (e) { outcome = { err: e instanceof NajizError ? e : new NajizError('AMBIGUOUS') }; }
     }
     const art = resolution(prep.key, outcome, nz.gw.simulated);
-    const out = await repo.tx(user.tenantId, async (tx) => {
+    const out = await repo.tx(user, async (tx) => {
       const cs = await load(tx, caseId, user, 'write', true);
       if (!cs) return undefined;
       const m = addArtifact(cs, art, user, now());
@@ -369,7 +369,7 @@ export function createApp(deps: AppDeps) {
     if (!nz) return najizOff(c);
     if (!nz.gw.configured) return najizNotReady(c);
     const caseId = c.req.param('id');
-    const cs0 = await repo.tx(user.tenantId, (tx) => load(tx, caseId, user, 'write'));
+    const cs0 = await repo.tx(user, (tx) => load(tx, caseId, user, 'write'));
     if (!cs0 || cs0.caseTypeKey !== 'legal.matter') return nf(c);
     if (!user.roles.includes('legal_counsel')) throw new AccessDeniedError('ROLE_REQUIRED:legal_counsel');
     const st = najizState(cs0);
@@ -378,8 +378,8 @@ export function createApp(deps: AppDeps) {
     try { updates = await nz.gw.fetchUpdates(st.najizRef); }
     catch (e) { const code = e instanceof NajizError ? e.code : 'UNAVAILABLE'; return c.json({ error: 'NAJIZ_' + code }, code === 'REJECTED' ? 422 : 503); }
     const imp = importUpdates(cs0, updates, nz.gw.simulated);
-    for (const d of imp.documents) await repo.putCaseDocument(user.tenantId, caseId, { ...d, uploadedBy: 'najiz', uploadedAt: now() });
-    const out = await repo.tx(user.tenantId, async (tx) => {
+    for (const d of imp.documents) await repo.putCaseDocument(user, caseId, { ...d, uploadedBy: 'najiz', uploadedAt: now() });
+    const out = await repo.tx(user, async (tx) => {
       let cs = await load(tx, caseId, user, 'write', true);
       if (!cs) return undefined;
       for (const a of imp.artifacts) {
@@ -473,7 +473,7 @@ export function createApp(deps: AppDeps) {
     if (!sel.ok) return unavailable(c);
     let asOf = now().slice(0, 10);
     if (b.caseId) {
-      const cs = await repo.tx(user.tenantId, (tx) => load(tx, b.caseId!, user));
+      const cs = await repo.tx(user, (tx) => load(tx, b.caseId!, user));
       if (!cs) return nf(c);
       const d = (cs.fields.incidentDate ?? cs.fields.occurredAt) as string | undefined;
       if (typeof d === 'string') asOf = d.slice(0, 10); // law as it stood on the event date
@@ -488,7 +488,7 @@ export function createApp(deps: AppDeps) {
     const b = await c.req.json<{ question: string }>();
     const sel = await choose(user);
     if (!sel.ok) return unavailable(c);
-    const visible = await repo.tx(user.tenantId, (tx) => tx.listCases());
+    const visible = await repo.tx(user, (tx) => tx.listCases());
     const out = await answerQuestion({ question: b.question, actor: user, cases: visible, defs: CASE_TYPES, provider: sel.provider, policy: { external: sel.external, includePersonal: sel.includePersonal } });
     await logCall(user, 'cases', sel, { citations: out.citations.length });
     return c.json({ ...out, engine: engineOf(sel) });

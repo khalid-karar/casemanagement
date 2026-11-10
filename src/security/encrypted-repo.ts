@@ -1,5 +1,6 @@
 import type { Artifact, AuditEvent, CaseState, CorrectiveAction } from '../engine';
-import type { CaseDocument, Repo, Tx } from '../api/repo';
+import { tenantOf } from '../api/repo';
+import type { CaseDocument, Repo, Scope, Tx } from '../api/repo';
 import { CASE_TYPES } from '../case-types';
 import { DataCrypto, type TenantKey } from './crypto';
 
@@ -49,8 +50,8 @@ export class EncryptedRepo implements Repo {
     return { ...c, fields, parties, artifacts, actions };
   }
 
-  tx<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
-    return this.inner.tx(tenantId, (tx) => fn({
+  tx<T>(scope: Scope, fn: (tx: Tx) => Promise<T>): Promise<T> {
+    return this.inner.tx(scope, (tx) => fn({
       getCase: async (id, lock) => { const c = await tx.getCase(id, lock); return c ? this.open(c) : undefined; },
       listCases: async () => Promise.all((await tx.listCases()).map((c) => this.open(c))),
       saveCase: async (c, ev, create) => tx.saveCase(await this.seal(c), ev, create),
@@ -58,11 +59,13 @@ export class EncryptedRepo implements Repo {
     }));
   }
 
-  async putCaseDocument(t: string, caseId: string, d: CaseDocument) {
-    return this.inner.putCaseDocument(t, caseId, { ...d, bytes: await this.dc.encryptBytes(t, `doc|${caseId}|${d.sha256}`, d.bytes) });
+  async putCaseDocument(sc: Scope, caseId: string, d: CaseDocument) {
+    const t = tenantOf(sc);
+    return this.inner.putCaseDocument(sc, caseId, { ...d, bytes: await this.dc.encryptBytes(t, `doc|${caseId}|${d.sha256}`, d.bytes) });
   }
-  async getCaseDocument(t: string, caseId: string, sha256: string) {
-    const d = await this.inner.getCaseDocument(t, caseId, sha256);
+  async getCaseDocument(sc: Scope, caseId: string, sha256: string) {
+    const t = tenantOf(sc);
+    const d = await this.inner.getCaseDocument(sc, caseId, sha256);
     return d ? { ...d, bytes: await this.dc.decryptBytes(t, `doc|${caseId}|${d.sha256}`, d.bytes) } : undefined;
   }
 

@@ -1,5 +1,5 @@
 import { appendEvent, verifyChain } from '../engine';
-import type { AuditEvent, AuditEventInput, CaseState } from '../engine';
+import type { Actor, AuditEvent, AuditEventInput, CaseState } from '../engine';
 import { LegalLibrary } from '../legal';
 import type { KeyStore, TenantKey } from '../security/crypto';
 import type { AiSettings } from '../ai/consent';
@@ -10,6 +10,13 @@ export interface CaseDocument { sha256: string; name: string; mime: string; byte
 export interface AiLogEntry { at: string; actorId: string; type: string; data: Record<string, unknown> }
 
 /** Everything inside one tenant-scoped transaction. */
+/**
+ * Who a transaction acts for. A signed-in person (an Actor) gets the department, clearance and privilege walls enforced by the
+ * database as well as by the application. A bare tenant id is a trusted internal job (tenant isolation only).
+ */
+export type Scope = string | Pick<Actor, 'tenantId' | 'kind' | 'departments' | 'roles' | 'clearance' | 'counselMatterIds'>;
+export const tenantOf = (s: Scope) => (typeof s === 'string' ? s : s.tenantId);
+
 export interface Tx {
   getCase(id: string, lock?: boolean): Promise<CaseState | undefined>;
   listCases(): Promise<CaseState[]>;
@@ -20,7 +27,7 @@ export interface Tx {
 
 export interface Repo extends KeyStore {
   /** Runs fn in a transaction bound to one tenant; row-level security applies in Postgres. */
-  tx<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T>;
+  tx<T>(scope: Scope, fn: (tx: Tx) => Promise<T>): Promise<T>;
   /**
    * Legal library access scoped to the caller's tenant. 'write' serialises writers and persists changes.
    * The library instance is fresh per call, so no state is shared between requests or servers.
@@ -28,8 +35,8 @@ export interface Repo extends KeyStore {
   lib<T>(tenantId: string, mode: 'read' | 'write', fn: (lib: LegalLibrary) => Promise<T> | T): Promise<T>;
   putFile(tenantId: string, f: { sha256: string; name: string; bytes: Uint8Array; uploadedBy: string }): Promise<void>;
   /** Stores a case document under its SHA-256. Idempotent: the same bytes for the same case are stored once. */
-  putCaseDocument(tenantId: string, caseId: string, doc: CaseDocument): Promise<void>;
-  getCaseDocument(tenantId: string, caseId: string, sha256: string): Promise<CaseDocument | undefined>;
+  putCaseDocument(scope: Scope, caseId: string, doc: CaseDocument): Promise<void>;
+  getCaseDocument(scope: Scope, caseId: string, sha256: string): Promise<CaseDocument | undefined>;
   getAiSettings(tenantId: string): Promise<AiSettings>;
   /** Saves the settings and appends the log entry in one transaction. */
   saveAiSettings(tenantId: string, s: AiSettings, entry: AiLogEntry): Promise<void>;
@@ -49,8 +56,8 @@ export class MemoryRepo implements Repo {
   private keys = new Map<string, TenantKey[]>();
   async getTenantKeys(t: string) { return [...(this.keys.get(t) ?? [])].sort((a, b) => a.version - b.version); }
   async putTenantKey(t: string, k: TenantKey) { const cur = this.keys.get(t) ?? []; if (cur.some((x) => x.version === k.version)) return false; this.keys.set(t, [...cur, k]); return true; }
-  async putCaseDocument(t: string, caseId: string, d: CaseDocument) { const k = `${t}\u0000${caseId}\u0000${d.sha256}`; if (!this.docs.has(k)) this.docs.set(k, d); }
-  async getCaseDocument(t: string, caseId: string, sha256: string) { return this.docs.get(`${t}\u0000${caseId}\u0000${sha256}`); }
+  async putCaseDocument(sc: Scope, caseId: string, d: CaseDocument) { const t = tenantOf(sc); const k = `${t}\u0000${caseId}\u0000${d.sha256}`; if (!this.docs.has(k)) this.docs.set(k, d); }
+  async getCaseDocument(sc: Scope, caseId: string, sha256: string) { const t = tenantOf(sc); return this.docs.get(`${t}\u0000${caseId}\u0000${sha256}`); }
   private ai = new Map<string, AiSettings>();
   private aiLog = new Map<string, AiLogEntry[]>();
   async getAiSettings(t: string) { return this.ai.get(t) ?? defaultSettings(t); }
@@ -61,7 +68,8 @@ export class MemoryRepo implements Repo {
 
   /** Transactions run one at a time, like Postgres row locks (`FOR UPDATE`) make two writers on one case take turns. */
   private chain: Promise<unknown> = Promise.resolve();
-  async tx<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
+  async tx<T>(scope: Scope, fn: (tx: Tx) => Promise<T>): Promise<T> {
+    const tenantId = tenantOf(scope);
     const run = this.chain.then(() => this.txNow(tenantId, fn));
     this.chain = run.catch(() => undefined);
     return run;

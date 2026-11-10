@@ -4,7 +4,8 @@ import type { AuditEvent, AuditEventInput, CaseState } from '../engine';
 import { LegalLibrary } from '../legal';
 import type { Instrument, InstrumentVersion, RuleBinding } from '../legal';
 import type { Proposal } from '../legal';
-import type { AiLogEntry, CaseDocument, Repo, Tx } from './repo';
+import { tenantOf } from './repo';
+import type { AiLogEntry, CaseDocument, Repo, Scope, Tx } from './repo';
 import type { AiSettings } from '../ai/consent';
 import { defaultSettings } from '../ai/consent';
 
@@ -28,11 +29,16 @@ export class PgRepo implements Repo {
 
   async close() { await this.pool.end(); }
 
-  private async run<T>(tenantId: string, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
+  private async run<T>(scope: Scope, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
+    const tenantId = tenantOf(scope);
     const c = await this.pool.connect();
     try {
       await c.query('BEGIN');
-      await c.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+      const rank = { STANDARD: 0, RESTRICTED: 1, PRIVILEGED: 2 };
+      const a = typeof scope === 'string' ? undefined : scope;
+      await c.query(`SELECT set_config('app.tenant_id', $1, true), set_config('app.scope', $2, true), set_config('app.kind', $3, true),
+        set_config('app.departments', $4, true), set_config('app.roles', $5, true), set_config('app.matters', $6, true), set_config('app.clearance', $7, true)`,
+        [tenantId, a ? 'actor' : 'full', a?.kind ?? '', (a?.departments ?? []).join(','), (a?.roles ?? []).join(','), (a?.counselMatterIds ?? []).join(','), String(a ? rank[a.clearance] : 2)]);
       const out = await fn(c);
       await c.query('COMMIT');
       return out;
@@ -44,8 +50,9 @@ export class PgRepo implements Repo {
     }
   }
 
-  tx<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
-    return this.run(tenantId, (c) => {
+  tx<T>(scope: Scope, fn: (tx: Tx) => Promise<T>): Promise<T> {
+    const tenantId = tenantOf(scope);
+    return this.run(scope, (c) => {
       const loadAudit = async (caseId: string): Promise<AuditEvent[]> =>
         (await c.query('SELECT * FROM audit_events WHERE tenant_id = $1 AND case_id = $2 ORDER BY seq', [tenantId, caseId])).rows.map((r) => ({
           caseId: r.case_id, tenantId: r.tenant_id, seq: Number(r.seq), type: r.type, actorId: r.actor_id, actorKind: r.actor_kind,
@@ -126,14 +133,16 @@ export class PgRepo implements Repo {
     });
   }
 
-  putCaseDocument(tenantId: string, caseId: string, d: CaseDocument) {
-    return this.run(tenantId, async (c) => {
+  putCaseDocument(scope: Scope, caseId: string, d: CaseDocument) {
+    const tenantId = tenantOf(scope);
+    return this.run(scope, async (c) => {
       await c.query('INSERT INTO case_documents (tenant_id,case_id,sha256,name,mime,size_bytes,bytes,uploaded_by,uploaded_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (tenant_id, case_id, sha256) DO NOTHING',
         [tenantId, caseId, d.sha256, d.name, d.mime, d.bytes.byteLength, Buffer.from(d.bytes), d.uploadedBy, d.uploadedAt]);
     });
   }
-  getCaseDocument(tenantId: string, caseId: string, sha256: string) {
-    return this.run(tenantId, async (c) => {
+  getCaseDocument(scope: Scope, caseId: string, sha256: string) {
+    const tenantId = tenantOf(scope);
+    return this.run(scope, async (c) => {
       const r = (await c.query('SELECT sha256, name, mime, bytes, uploaded_by, uploaded_at FROM case_documents WHERE tenant_id = $1 AND case_id = $2 AND sha256 = $3', [tenantId, caseId, sha256])).rows[0];
       return r ? { sha256: String(r.sha256).trim(), name: r.name, mime: r.mime, bytes: new Uint8Array(r.bytes), uploadedBy: r.uploaded_by, uploadedAt: r.uploaded_at } as CaseDocument : undefined;
     });
