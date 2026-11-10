@@ -19,15 +19,15 @@ const I = {
     citations:'Citations', none:'None', noLaws:'No verified laws yet', stale:'Rules needing re-approval', article:'Article', saved:'Done', err:'Error', engine:'AI engine', engSov:'Our own model', engIk:'In-Kingdom cloud provider', consentT:'Authorisation to use an in-Kingdom provider', inclP:'Allow names and personal data to be sent', signName:'Name', signTitle:'Job title', ack:'I am authorised to sign and have read the full text', signB:'Sign and enable', revokeB:'Withdraw authorisation', signedBy:'Signed by', offNote:'No cloud provider is enabled for your organisation: no data leaves our infrastructure.', noAi:'AI is not enabled', ready:'Legal rules readiness', syncB:'Bind rules to verified laws', st_READY:'Ready', st_NEEDS_COUNSEL:'Needs counsel', st_NO_STATUTORY_RULES_MAPPED:'No statutory rules mapped yet', staleN:'Stale rules', unboundN:'Unbound', tabReview:'Law review (team)', source:'Source text', findings:'AI-extracted findings', accept:'Accept', rejectP:'Reject', pending:'Awaiting verification', nothing:'No versions under review', aiOnly:'AI proposals are visible to the platform team only, never to clients' },
 };
 let lang = localStorage.getItem('lang') || 'ar';
-let user = localStorage.getItem('user') || 'hr-mgr';
+let user = localStorage.getItem('user') || 'a-hr-mgr';
+// Who the server says the selected account is. Tabs and admin-only panels follow this, never a hard-coded id.
+let me = null;
 let tab = 'cases';
 let openId = null;
 const t = (k) => I[lang][k];
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const USERS = ['hr-mgr', 'hr-inv', 'hr-dir', 'client-admin', 'counsel', 'editor', 'verifier'];
-const BACKOFFICE = ['editor', 'verifier'];
-const isBack = () => Auth.mode === 'oidc' ? Auth.me.tenantId === 'platform' : BACKOFFICE.includes(user);
+const isBack = () => me?.tenantId === 'platform';
 
 async function api(method, path, body) {
   const r = await fetch(path + (path.includes('?') ? '&' : '?') + 'lang=' + lang, {
@@ -47,7 +47,13 @@ function chrome() {
   document.querySelector('[data-i=user]').textContent = t('user');
   $('#langBtn').textContent = lang === 'ar' ? 'English' : 'العربية';
   if (Auth.mode === 'oidc') { $('#user').parentElement.hidden = true; $('#who').innerHTML = `${esc(Auth.me.name)} <button id="outBtn" type="button">${lang === 'ar' ? 'خروج' : 'Sign out'}</button>`; $('#outBtn').onclick = Auth.logout; }
-  else $('#user').innerHTML = USERS.map((u) => `<option value="${u}" ${u === user ? 'selected' : ''}>${u}</option>`).join('');
+  else {
+    // Grouped by tenant so a tester can see at a glance which organisation they are acting as.
+    const byTenant = Auth.users.reduce((m, u) => ((m[u.tenantId] ??= []).push(u), m), {});
+    $('#user').innerHTML = Object.entries(byTenant).map(([tid, us]) =>
+      `<optgroup label="${esc(tid)}">${us.map((u) => `<option value="${esc(u.id)}" ${u.id === user ? 'selected' : ''}>${esc(u.id)} — ${esc(u.name)}</option>`).join('')}</optgroup>`).join('');
+    $('#who').textContent = me ? `${me.tenantId} · ${me.departments.join(', ')} · ${me.clearance ?? ''}` : '';
+  }
   if (isBack() && tab !== 'review' && tab === 'cases') tab = 'review';
   if (!isBack() && tab === 'review') tab = 'cases';
   $('#tabs').innerHTML = (isBack() ? [['review', 'tabReview'], ['laws', 'tabLaws']] : [['cases', 'tabCases'], ['laws', 'tabLaws'], ['ai', 'tabAi']])
@@ -141,7 +147,7 @@ async function viewAi() {
   const st = await api('GET', '/ai/settings');
   const S = st.j || {};
   const label = (e) => (e ? `${e.mode === 'in_kingdom' ? t('engIk') : t('engSov')} — ${esc(e.label)}` : t('noAi'));
-  const isAdmin = user === 'client-admin';
+  const isAdmin = (me?.roles ?? []).includes('tenant_admin');
   $('#view').innerHTML = `<div class="card"><h3>${t('tabAi')}</h3><div class="warn">${t('draft')}</div>
   <p class="mute">${t('engine')}: <b>${label(S.current)}</b></p>
   <textarea id="q" rows="3" style="width:100%" placeholder="${t('question')}"></textarea>
@@ -172,7 +178,12 @@ async function viewAi() {
   draw();
 }
 
-async function render() { chrome(); if (tab === 'cases') await viewCases(); else if (tab === 'review') await viewReview(); else if (tab === 'laws') await viewLaws(); else await viewAi(); }
+async function render() {
+  // Identity first: tabs and the admin panel are decided by what the server says this account is.
+  me = Auth.mode === 'oidc' ? Auth.me : (await api('GET', '/me')).j;
+  chrome();
+  if (tab === 'cases') await viewCases(); else if (tab === 'review') await viewReview(); else if (tab === 'laws') await viewLaws(); else await viewAi();
+}
 document.addEventListener('click', (e) => {
   const o = e.target.closest('[data-open]'); if (o) { openId = o.dataset.open; render(); }
   const tb = e.target.closest('[data-tab]'); if (tb) { tab = tb.dataset.tab; openId = null; render(); }

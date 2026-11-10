@@ -1,0 +1,997 @@
+{
+  "realm": "cms",
+  "enabled": true,
+  "displayName": "Case Management (QA — test data only)",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "loginWithEmailAllowed": false,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "maxFailureWaitSeconds": 900,
+  "permanentLockout": false,
+  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and passwordHistory(5)",
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "internationalizationEnabled": true,
+  "supportedLocales": [
+    "ar",
+    "en"
+  ],
+  "defaultLocale": "ar",
+  "eventsEnabled": true,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
+  "eventsExpiration": 31536000,
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA256",
+  "otpPolicyDigits": 6,
+  "otpPolicyPeriod": 30,
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 10
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "audit_assurance"
+      },
+      {
+        "name": "audit_director"
+      },
+      {
+        "name": "audit_manager"
+      },
+      {
+        "name": "auditor"
+      },
+      {
+        "name": "case_manager"
+      },
+      {
+        "name": "ethics_officer"
+      },
+      {
+        "name": "general_counsel"
+      },
+      {
+        "name": "hr_director"
+      },
+      {
+        "name": "hr_intake"
+      },
+      {
+        "name": "hr_investigator"
+      },
+      {
+        "name": "hr_manager"
+      },
+      {
+        "name": "legal_content_editor"
+      },
+      {
+        "name": "legal_counsel"
+      },
+      {
+        "name": "legal_verifier"
+      },
+      {
+        "name": "records_officer"
+      },
+      {
+        "name": "security_director"
+      },
+      {
+        "name": "security_intake"
+      },
+      {
+        "name": "security_investigator"
+      },
+      {
+        "name": "security_manager"
+      },
+      {
+        "name": "tenant_admin"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "case-web",
+      "name": "Case Management web app",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8080/",
+        "http://localhost:3000/",
+        "https://CHANGE-ME.example.sa/"
+      ],
+      "webOrigins": [
+        "+"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "case-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "tenant_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "departments",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "departments",
+            "claim.name": "departments",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "clearance",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "clearance",
+            "claim.name": "clearance",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "reports_to",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "reports_to",
+            "claim.name": "reports_to",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "actor_kind",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "actor_kind",
+            "claim.name": "actor_kind",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "counsel_matter_ids",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "counsel_matter_ids",
+            "claim.name": "counsel_matter_ids",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "case-qa",
+      "name": "QA test client (non-production)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.custom.audience": "case-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "tenant_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "tenant_id",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "departments",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "departments",
+            "claim.name": "departments",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "clearance",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "clearance",
+            "claim.name": "clearance",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "reports_to",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "reports_to",
+            "claim.name": "reports_to",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "actor_kind",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "actor_kind",
+            "claim.name": "actor_kind",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "counsel_matter_ids",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "counsel_matter_ids",
+            "claim.name": "counsel_matter_ids",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "a-hr-intake",
+      "email": "a-hr-intake@example.invalid",
+      "firstName": "a-hr-intake",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "HR"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "hr_intake"
+      ]
+    },
+    {
+      "username": "a-hr-mgr",
+      "email": "a-hr-mgr@example.invalid",
+      "firstName": "a-hr-mgr",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "HR"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "hr_manager",
+        "hr_intake"
+      ]
+    },
+    {
+      "username": "a-hr-inv",
+      "email": "a-hr-inv@example.invalid",
+      "firstName": "a-hr-inv",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "HR"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "hr_investigator"
+      ]
+    },
+    {
+      "username": "a-hr-dir",
+      "email": "a-hr-dir@example.invalid",
+      "firstName": "a-hr-dir",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "HR"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "hr_director"
+      ]
+    },
+    {
+      "username": "a-ethics",
+      "email": "a-ethics@example.invalid",
+      "firstName": "a-ethics",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "HR"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "ethics_officer"
+      ]
+    },
+    {
+      "username": "a-low",
+      "email": "a-low@example.invalid",
+      "firstName": "a-low",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "HR"
+        ],
+        "clearance": [
+          "STANDARD"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "hr_intake"
+      ]
+    },
+    {
+      "username": "a-sec-mgr",
+      "email": "a-sec-mgr@example.invalid",
+      "firstName": "a-sec-mgr",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "SECURITY"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "security_manager",
+        "security_intake"
+      ]
+    },
+    {
+      "username": "a-sec-inv",
+      "email": "a-sec-inv@example.invalid",
+      "firstName": "a-sec-inv",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "SECURITY"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "security_investigator"
+      ]
+    },
+    {
+      "username": "a-sec-dir",
+      "email": "a-sec-dir@example.invalid",
+      "firstName": "a-sec-dir",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "SECURITY"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "security_director"
+      ]
+    },
+    {
+      "username": "a-aud-mgr",
+      "email": "a-aud-mgr@example.invalid",
+      "firstName": "a-aud-mgr",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "AUDIT"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "audit_manager",
+        "auditor"
+      ]
+    },
+    {
+      "username": "a-aud-dir",
+      "email": "a-aud-dir@example.invalid",
+      "firstName": "a-aud-dir",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "AUDIT"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "audit_director"
+      ]
+    },
+    {
+      "username": "a-assurance",
+      "email": "a-assurance@example.invalid",
+      "firstName": "a-assurance",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "AUDIT"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "audit_assurance"
+      ]
+    },
+    {
+      "username": "a-counsel",
+      "email": "a-counsel@example.invalid",
+      "firstName": "a-counsel",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "LEGAL"
+        ],
+        "clearance": [
+          "PRIVILEGED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "legal_counsel",
+        "general_counsel",
+        "case_manager"
+      ]
+    },
+    {
+      "username": "a-gc",
+      "email": "a-gc@example.invalid",
+      "firstName": "a-gc",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "LEGAL"
+        ],
+        "clearance": [
+          "PRIVILEGED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "general_counsel"
+      ]
+    },
+    {
+      "username": "a-records",
+      "email": "a-records@example.invalid",
+      "firstName": "a-records",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "HR"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "records_officer"
+      ]
+    },
+    {
+      "username": "a-admin",
+      "email": "a-admin@example.invalid",
+      "firstName": "a-admin",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "HR"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "tenant_admin"
+      ]
+    },
+    {
+      "username": "a-ext-counsel",
+      "email": "a-ext-counsel@example.invalid",
+      "firstName": "a-ext-counsel",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-a"
+        ],
+        "departments": [
+          "LEGAL"
+        ],
+        "clearance": [
+          "PRIVILEGED"
+        ],
+        "actor_kind": [
+          "external"
+        ],
+        "counsel_matter_ids": [
+          "m-1"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": []
+    },
+    {
+      "username": "b-hr-mgr",
+      "email": "b-hr-mgr@example.invalid",
+      "firstName": "b-hr-mgr",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-b"
+        ],
+        "departments": [
+          "HR"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "hr_manager",
+        "hr_intake"
+      ]
+    },
+    {
+      "username": "b-counsel",
+      "email": "b-counsel@example.invalid",
+      "firstName": "b-counsel",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-b"
+        ],
+        "departments": [
+          "LEGAL"
+        ],
+        "clearance": [
+          "PRIVILEGED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "legal_counsel",
+        "general_counsel"
+      ]
+    },
+    {
+      "username": "b-admin",
+      "email": "b-admin@example.invalid",
+      "firstName": "b-admin",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "tenant-b"
+        ],
+        "departments": [
+          "HR"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "tenant_admin"
+      ]
+    },
+    {
+      "username": "p-editor",
+      "email": "p-editor@example.invalid",
+      "firstName": "p-editor",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "platform"
+        ],
+        "departments": [
+          "LEGAL"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "legal_content_editor"
+      ]
+    },
+    {
+      "username": "p-verifier",
+      "email": "p-verifier@example.invalid",
+      "firstName": "p-verifier",
+      "lastName": "Test",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "tenant_id": [
+          "platform"
+        ],
+        "departments": [
+          "LEGAL"
+        ],
+        "clearance": [
+          "RESTRICTED"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Qa-Test-Only-Passw0rd!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "legal_verifier"
+      ]
+    }
+  ],
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\":[{\"name\":\"username\",\"validations\":{\"length\":{\"min\":3,\"max\":255}},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"email\",\"validations\":{\"email\":{}},\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"firstName\",\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"lastName\",\"required\":{\"roles\":[\"user\"]},\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]}},{\"name\":\"tenant_id\",\"multivalued\":false,\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]}},{\"name\":\"departments\",\"multivalued\":true,\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]}},{\"name\":\"clearance\",\"multivalued\":false,\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]}},{\"name\":\"reports_to\",\"multivalued\":true,\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]}},{\"name\":\"actor_kind\",\"multivalued\":false,\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]}},{\"name\":\"counsel_matter_ids\",\"multivalued\":true,\"permissions\":{\"view\":[\"admin\"],\"edit\":[\"admin\"]}}]}"
+          ]
+        }
+      }
+    ]
+  }
+}

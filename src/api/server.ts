@@ -7,6 +7,7 @@ import { MemoryRepo } from './repo';
 import { PgRepo } from './pg-repo';
 import { openAICompatProvider } from '../ai';
 import { visionFromConfig } from '../legal';
+import { TEST_USERS, asPrincipal } from './test-users';
 
 // Sign-in. Real deployments use OIDC (Keycloak). The dev directory exists only for local demos and is refused in production.
 const authMode = process.env.AUTH_MODE;
@@ -17,19 +18,9 @@ const repo = process.env.DATABASE_URL
   ? await PgRepo.connect(process.env.DATABASE_URL)
   : (console.warn('DATABASE_URL not set: using in-memory storage. Data is lost on restart.'), new MemoryRepo());
 
-// Demo users for local development only.
-const T = '00000000-0000-0000-0000-000000000001';
-const u = (id: string, name: string, departments: any, roles: string[], clearance: any = 'RESTRICTED', tenantId = T) =>
-  directory.add({ id, name, kind: 'human', tenantId, departments, roles, reportsTo: [], clearance });
-if (authMode === 'dev') {
-u('hr-mgr', 'HR Manager', ['HR'], ['hr_intake', 'hr_manager']);
-u('hr-inv', 'HR Investigator', ['HR'], ['hr_investigator']);
-u('hr-dir', 'HR Director', ['HR'], ['hr_director']);
-u('client-admin', 'Client Admin', ['HR'], ['tenant_admin']);
-u('counsel', 'In-house Counsel', ['LEGAL'], ['legal_counsel', 'general_counsel'], 'PRIVILEGED');
-u('editor', 'Legal Content Editor', ['LEGAL'], ['legal_content_editor'], 'RESTRICTED', 'platform');
-u('verifier', 'Legal Verifier (Counsel)', ['LEGAL'], ['legal_verifier'], 'RESTRICTED', 'platform');
-}
+// Demo users for local development and QA only. The same matrix becomes the QA Keycloak realm
+// (`pnpm gen:realm:qa`), so a wall proved here is the same wall proved through real sign-in.
+if (authMode === 'dev') for (const u of TEST_USERS) directory.add(asPrincipal(u));
 
 // Sovereign model (own GPU). Optional: leave LLM_BASE_URL unset until a client needs own-model-only.
 const baseUrl = process.env.LLM_BASE_URL;
@@ -61,7 +52,8 @@ const paidOcr = process.env.PAID_OCR_API_KEY
     })
   : undefined;
 let authn: { resolve: (h: string | undefined) => any } = directory;
-let authInfo: { mode: 'dev' | 'oidc'; issuer?: string; clientId?: string } = { mode: 'dev' };
+let authInfo: { mode: 'dev' | 'oidc'; issuer?: string; clientId?: string; users?: { id: string; name: string; tenantId: string }[] } =
+  { mode: 'dev', users: TEST_USERS.map(({ id, name, tenantId }) => ({ id, name, tenantId })) };
 if (authMode === 'oidc') {
   const issuer = process.env.OIDC_ISSUER;
   if (!issuer) throw new Error('OIDC_ISSUER is required');

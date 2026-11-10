@@ -44,6 +44,9 @@
   "roles": {
     "realm": [
       {
+        "name": "audit_assurance"
+      },
+      {
         "name": "audit_director"
       },
       {
@@ -51,6 +54,9 @@
       },
       {
         "name": "auditor"
+      },
+      {
+        "name": "case_manager"
       },
       {
         "name": "ethics_officer"

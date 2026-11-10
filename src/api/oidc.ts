@@ -20,9 +20,19 @@ const DEPARTMENTS = ['HR', 'SECURITY', 'AUDIT', 'LEGAL'] as const;
 const CLEARANCES = ['STANDARD', 'RESTRICTED', 'PRIVILEGED'] as const;
 const TENANT = /^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/;
 
-/** Every role the platform understands. Roles in a token that are not on this list are ignored. */
+/**
+ * Every role the platform understands. Roles in a token that are not on this list are ignored.
+ * The seed set holds the roles that grant permissions directly (see engine/permissions.ts) rather
+ * than appearing in a transition guard; the loop below adds every role a case type names.
+ * A role used by canAccess but missing here would be silently stripped from every token, so the
+ * capability would exist in dev mode and quietly not exist in production.
+ */
 export function knownRoles(): Set<string> {
-  const r = new Set<string>(['tenant_admin', 'ethics_officer', 'legal_counsel', 'general_counsel', 'legal_content_editor', 'legal_verifier', 'records_officer']);
+  const r = new Set<string>([
+    'tenant_admin', 'ethics_officer', 'legal_counsel', 'general_counsel', 'legal_content_editor', 'legal_verifier', 'records_officer',
+    'audit_assurance', // read-across: non-privileged cases in other departments, always redacted
+    'case_manager', // export
+  ]);
   for (const d of Object.values(CASE_TYPES)) {
     for (const t of d.transitions) for (const g of t.guards) {
       if (g.kind === 'role') g.anyOf.forEach((x) => r.add(x));

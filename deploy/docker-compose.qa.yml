@@ -1,0 +1,16 @@
+# QA environment override. Use with the base file:
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.qa.yml up
+#
+# Differences from the base stack (which is the production shape):
+#   - Keycloak imports the QA realm (20 test users, case-qa password-grant client, TOTP enrolment not forced).
+#   - The API also accepts tokens issued to `case-qa`, so scripts and API tests can sign in without a browser.
+#
+# TEST DATA ONLY. Never point this at real data, and never import cms-realm-qa.json into a real environment.
+# The penetration test runs against the BASE stack (production realm, TOTP on), not this one.
+services:
+  keycloak:
+    volumes:
+      - ./keycloak/cms-realm-qa.json:/opt/keycloak/data/import/cms-realm.json:ro
+  app:
+    environment:
+      OIDC_ALLOWED_CLIENTS: case-web,case-qa

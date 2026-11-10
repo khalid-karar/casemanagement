@@ -10,10 +10,14 @@ Multi-tenant, Arabic-first case management for Saudi corporates: HR, Security, A
 - `src/db` – SQL migrations (RLS, append-only audit) and migration runner; see `docs/DB-SETUP.md`
 - `web/` – Arabic-first bilingual UI
 - `docs/` – model decision, counsel confirmations
+- `docs/handoff/` – QA and penetration-test pack for the Saudi team (start at its README)
 
 `pnpm install && pnpm typecheck && pnpm test`
 
-Not yet built: identity (Keycloak/Nafath), Najiz integration, job queue, eval tasks (`pnpm eval:ai` has no tasks yet).
+Not yet built: Nafath sign-in, Najiz integration, job queue, eval tasks (`pnpm eval:ai` has no tasks yet), encryption of sensitive fields, backups and retention. See `docs/handoff/KNOWN-GAPS.md`.
+
+## Test data
+`pnpm seed` loads QA cases and a verified law into a running server. The 22 test accounts live in `src/api/test-users.ts` and drive both the dev user switcher and the QA Keycloak realm (`pnpm gen:realm:qa`). Test data only.
 
 ## Sign-in
 Run locally with `pnpm start:dev` (demo user switcher, `AUTH_MODE=dev`). Real deployments use Keycloak (`AUTH_MODE=oidc`); see docs/KEYCLOAK.md. The server refuses to start without an explicit mode, and refuses dev mode in production.

@@ -19,8 +19,12 @@ export interface AppDeps {
   repo: Repo; paidOcr?: VisionOcr;
   /** Resolves a verified Principal from an Authorization header (dev Directory or OIDC). */
   directory: { resolve(header: string | undefined): Principal | undefined | Promise<Principal | undefined> };
-  /** Public sign-in settings for the web app. */
-  authInfo?: { mode: 'dev' | 'oidc'; issuer?: string; clientId?: string };
+  /**
+   * Public sign-in settings for the web app. In dev mode it also carries the demo user list that
+   * fills the switcher, so the UI never holds its own copy of the test-user ids. Never populated
+   * in oidc mode, and dev mode is refused when NODE_ENV=production.
+   */
+  authInfo?: { mode: 'dev' | 'oidc'; issuer?: string; clientId?: string; users?: { id: string; name: string; tenantId: string }[] };
   /** Our own (sovereign) model. */
   provider?: ChatProvider;
   /** External in-Kingdom provider, usable only for tenants with a valid signed consent. */
@@ -82,7 +86,7 @@ export function createApp(deps: AppDeps) {
   });
 
   app.get('/auth/config', (c) => c.json(deps.authInfo ?? { mode: 'dev' }));
-  app.get('/me', (c) => { const u = c.get('user'); return c.json({ id: u.id, name: u.name, tenantId: u.tenantId, roles: u.roles, departments: u.departments, kind: u.kind }); });
+  app.get('/me', (c) => { const u = c.get('user'); return c.json({ id: u.id, name: u.name, tenantId: u.tenantId, roles: u.roles, departments: u.departments, kind: u.kind, clearance: u.clearance }); });
   app.get('/health', async (c) => c.json({ ok: true, ocr: await ocrAvailable(), paidOcrForPlatformLaw: Boolean(paidOcr) }));
 
   // Not-found and not-permitted look identical so existence is not leaked across walls.
@@ -92,6 +96,12 @@ export function createApp(deps: AppDeps) {
     return cs;
   };
   const nf = (c: any) => c.json({ error: 'NOT_FOUND', message: T.notFound[c.get('lang') as 'ar' | 'en'] }, 404);
+  /**
+   * The ONLY way a case leaves the API. Every route that returns a case goes through this, so a sealed
+   * reporter or a masked personal field can never be read back from a write response.
+   * (Regression: write routes once returned the stored case, leaking the sealed reporter to HR managers.)
+   */
+  const view = (cs: any, user: Principal) => redactForActor(CASE_TYPES[cs.caseTypeKey]!, cs, user);
 
   // ---- Cases -----------------------------------------------------------------
   app.get('/case-types', async (c) => {
@@ -106,13 +116,13 @@ export function createApp(deps: AppDeps) {
     if (!def) return c.json({ error: 'UNKNOWN_CASE_TYPE' }, 400);
     const m = createCase(def, { id: b.id, fields: b.fields ?? {}, parties: b.parties ?? [] }, user, now());
     await repo.tx(user.tenantId, (tx) => tx.saveCase(m.case, m.event, true));
-    return c.json(m.case, 201);
+    return c.json(view(m.case, user), 201);
   });
 
   app.get('/cases', async (c) => {
     const user = c.get('user');
     const all = await repo.tx(user.tenantId, (tx) => tx.listCases());
-    return c.json(all.filter((x) => canAccess(user, x, 'read').allowed).map((x) => redactForActor(CASE_TYPES[x.caseTypeKey]!, x, user)));
+    return c.json(all.filter((x) => canAccess(user, x, 'read').allowed).map((x) => view(x, user)));
   });
 
   app.get('/cases/:id', async (c) => {
@@ -127,7 +137,7 @@ export function createApp(deps: AppDeps) {
         const lang = c.get('lang');
         return { action: t.action, label: t.label, allowed: ev.allowed, blockers: ev.blockers.map((b) => ({ code: b.code, message: lang === 'ar' ? b.messageAr ?? b.message : b.message })) };
       });
-    return c.json({ case: redactForActor(def, cs, user), actions });
+    return c.json({ case: view(cs, user), actions });
   });
 
   app.post('/cases/:id/transitions/:action', async (c) => {
@@ -140,7 +150,7 @@ export function createApp(deps: AppDeps) {
       await tx.saveCase(m.case, m.event);
       return m.case;
     });
-    return out ? c.json(out) : nf(c);
+    return out ? c.json(view(out, user)) : nf(c);
   });
 
   const mutate = (fn: (cs: any, user: Principal, body: any) => { case: any; event: any }, action: 'write' | 'transition' = 'write') =>
@@ -154,7 +164,7 @@ export function createApp(deps: AppDeps) {
         await tx.saveCase(m.case, m.event);
         return m.case;
       });
-      return out ? c.json(out) : nf(c);
+      return out ? c.json(view(out, user)) : nf(c);
     };
   app.patch('/cases/:id/fields', mutate((cs, u, b) => setFields(cs, b, u, now())));
   app.post('/cases/:id/artifacts', mutate((cs, u, b) => addArtifact(cs, b, u, now())));
