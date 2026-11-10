@@ -5,14 +5,15 @@ import {
 } from '../engine';
 import type { Principal } from './auth';
 import { Directory } from './auth';
-import { Store } from './store';
+import type { Repo, Tx } from './repo';
 import { CASE_TYPES } from '../case-types';
 import { FileError, LegalError, extractProposals, extractText } from '../legal';
+import type { LegalLibrary } from '../legal';
 import { legalStatus, syncBindings } from '../case-types/legal-sources';
 import { answerFromLaws, answerQuestion } from '../ai';
 import type { ChatProvider } from '../ai';
 
-export interface AppDeps { store: Store; directory: Directory; provider: ChatProvider; clock?: () => string }
+export interface AppDeps { repo: Repo; directory: Directory; provider: ChatProvider; clock?: () => string }
 type Env = { Variables: { user: Principal; lang: 'ar' | 'en' } };
 
 const T = {
@@ -31,7 +32,7 @@ const pickLang = (q: string | undefined, h: string | undefined): 'ar' | 'en' =>
 const STATIC = new Set(['/', '/index.html', '/app.js', '/style.css', '/favicon.ico']);
 
 export function createApp(deps: AppDeps) {
-  const { store, directory, provider } = deps;
+  const { repo, directory, provider } = deps;
   const now = deps.clock ?? (() => new Date().toISOString());
   const app = new Hono<Env>();
 
@@ -56,23 +57,26 @@ export function createApp(deps: AppDeps) {
     if (err instanceof ConflictOfInterestError) return c.json({ error: 'CONFLICT_OF_INTEREST', codes: err.codes, message: T.conflict[lang] }, 409);
     if (err instanceof FileError) return c.json({ error: err.code, message: T.badRequest[lang] }, err.code === 'FILE_TOO_LARGE' ? 413 : 400);
     if (err instanceof LegalError) return c.json({ error: err.code, message: T.forbidden[lang] }, err.code === 'UNKNOWN_VERSION' || err.code === 'UNKNOWN_INSTRUMENT' ? 404 : 403);
+    if ((err as { code?: string }).code === '23505' || (err as Error).message === 'CASE_EXISTS') return c.json({ error: 'CASE_EXISTS', message: T.badRequest[lang] }, 409);
     // Never leak internals.
     return c.json({ error: 'BAD_REQUEST', message: T.badRequest[lang] }, 400);
   });
 
   app.get('/health', (c) => c.json({ ok: true }));
 
-  const load = (id: string, user: Principal, action: 'read' | 'write' | 'transition' = 'read') => {
-    const cs = store.cases.get(id);
-    // Not-found and not-permitted look identical so existence is not leaked across walls.
+  // Not-found and not-permitted look identical so existence is not leaked across walls.
+  const load = async (tx: Tx, id: string, user: Principal, action: 'read' | 'write' | 'transition' = 'read', lock = false) => {
+    const cs = await tx.getCase(id, lock);
     if (!cs || cs.tenantId !== user.tenantId || !canAccess(user, cs, action).allowed) return undefined;
     return cs;
   };
   const nf = (c: any) => c.json({ error: 'NOT_FOUND', message: T.notFound[c.get('lang') as 'ar' | 'en'] }, 404);
 
   // ---- Cases -----------------------------------------------------------------
-  app.get('/case-types', (c) =>
-    c.json(Object.values(CASE_TYPES).map((d) => ({ key: d.key, domain: d.domain, label: d.label, legalReview: d.legalReview.status, legal: legalStatus(store.library, d.key) }))));
+  app.get('/case-types', async (c) => {
+    const lib = await repo.lib(c.get('user').tenantId, 'read', (l) => l);
+    return c.json(Object.values(CASE_TYPES).map((d) => ({ key: d.key, domain: d.domain, label: d.label, legalReview: d.legalReview.status, legal: legalStatus(lib, d.key) })));
+  });
 
   app.post('/cases', async (c) => {
     const user = c.get('user');
@@ -80,21 +84,19 @@ export function createApp(deps: AppDeps) {
     const def = CASE_TYPES[b.caseType];
     if (!def) return c.json({ error: 'UNKNOWN_CASE_TYPE' }, 400);
     const m = createCase(def, { id: b.id, fields: b.fields ?? {}, parties: b.parties ?? [] }, user, now());
-    store.save(m.case, m.event);
+    await repo.tx(user.tenantId, (tx) => tx.saveCase(m.case, m.event, true));
     return c.json(m.case, 201);
   });
 
-  app.get('/cases', (c) => {
+  app.get('/cases', async (c) => {
     const user = c.get('user');
-    const out = [...store.cases.values()]
-      .filter((x) => x.tenantId === user.tenantId && canAccess(user, x, 'read').allowed)
-      .map((x) => redactForActor(CASE_TYPES[x.caseTypeKey]!, x, user));
-    return c.json(out);
+    const all = await repo.tx(user.tenantId, (tx) => tx.listCases());
+    return c.json(all.filter((x) => canAccess(user, x, 'read').allowed).map((x) => redactForActor(CASE_TYPES[x.caseTypeKey]!, x, user)));
   });
 
-  app.get('/cases/:id', (c) => {
+  app.get('/cases/:id', async (c) => {
     const user = c.get('user');
-    const cs = load(c.req.param('id'), user);
+    const cs = await repo.tx(user.tenantId, (tx) => load(tx, c.req.param('id'), user));
     if (!cs) return nf(c);
     const def = CASE_TYPES[cs.caseTypeKey]!;
     const actions = def.transitions
@@ -107,23 +109,31 @@ export function createApp(deps: AppDeps) {
     return c.json({ case: redactForActor(def, cs, user), actions });
   });
 
-  app.post('/cases/:id/transitions/:action', (c) => {
+  app.post('/cases/:id/transitions/:action', async (c) => {
     const user = c.get('user');
-    const cs = load(c.req.param('id'), user, 'transition');
-    if (!cs) return nf(c);
-    const m = applyTransition(CASE_TYPES[cs.caseTypeKey]!, cs, c.req.param('action'), user, now());
-    store.save(m.case, m.event);
-    return c.json(m.case);
+    // Row lock: two people acting on one case are serialised, so guards always see the latest state.
+    const out = await repo.tx(user.tenantId, async (tx) => {
+      const cs = await load(tx, c.req.param('id'), user, 'transition', true);
+      if (!cs) return undefined;
+      const m = applyTransition(CASE_TYPES[cs.caseTypeKey]!, cs, c.req.param('action'), user, now());
+      await tx.saveCase(m.case, m.event);
+      return m.case;
+    });
+    return out ? c.json(out) : nf(c);
   });
 
   const mutate = (fn: (cs: any, user: Principal, body: any) => { case: any; event: any }, action: 'write' | 'transition' = 'write') =>
     async (c: any) => {
       const user = c.get('user') as Principal;
-      const cs = load(c.req.param('id'), user, action);
-      if (!cs) return nf(c);
-      const m = fn(cs, user, await c.req.json());
-      store.save(m.case, m.event);
-      return c.json(m.case);
+      const body = await c.req.json();
+      const out = await repo.tx(user.tenantId, async (tx) => {
+        const cs = await load(tx, c.req.param('id'), user, action, true);
+        if (!cs) return undefined;
+        const m = fn(cs, user, body);
+        await tx.saveCase(m.case, m.event);
+        return m.case;
+      });
+      return out ? c.json(out) : nf(c);
     };
   app.patch('/cases/:id/fields', mutate((cs, u, b) => setFields(cs, b, u, now())));
   app.post('/cases/:id/artifacts', mutate((cs, u, b) => addArtifact(cs, b, u, now())));
@@ -133,31 +143,40 @@ export function createApp(deps: AppDeps) {
   app.post('/cases/:id/legal-hold', mutate((cs, u, b) => placeLegalHold(cs, u, b.reason, now())));
   app.delete('/cases/:id/legal-hold', mutate((cs, u, b) => releaseLegalHold(cs, u, b.reason ?? '', now())));
 
-  app.get('/cases/:id/audit', (c) => {
-    const cs = load(c.req.param('id'), c.get('user'));
-    if (!cs) return nf(c);
-    return c.json({ events: store.audit.get(cs.id) ?? [], integrity: store.verify(cs.id) });
+  app.get('/cases/:id/audit', async (c) => {
+    const user = c.get('user');
+    const r = await repo.tx(user.tenantId, async (tx) => {
+      const cs = await load(tx, c.req.param('id'), user);
+      return cs ? tx.getAudit(cs.id) : undefined;
+    });
+    return r ? c.json({ events: r, integrity: repo.verifyChain(r) }) : nf(c);
   });
 
   // ---- Legal library -----------------------------------------------------------
   const lp = (u: Principal) => ({ id: u.id, roles: u.roles, tenantId: u.tenantId });
-  app.get('/laws', (c) => {
+  const rd = <T>(c: any, fn: (lib: LegalLibrary, u: ReturnType<typeof lp>) => T) => repo.lib(c.get('user').tenantId, 'read', (l) => fn(l, lp(c.get('user'))));
+  const wr = <T>(c: any, fn: (lib: LegalLibrary, u: ReturnType<typeof lp>) => T) => repo.lib(c.get('user').tenantId, 'write', (l) => fn(l, lp(c.get('user'))));
+
+  app.get('/laws', async (c) => {
     const user = c.get('user');
     const date = c.req.query('asOf') ?? now().slice(0, 10);
-    return c.json(store.library.verifiedProvisions(user.tenantId, date).map((p) => ({ instrument: p.instrument.titleAr, instrumentEn: p.instrument.titleEn, version: p.version.versionLabel, effectiveFrom: p.version.effectiveFrom, article: p.provision.number, textAr: p.provision.textAr, textEn: p.provision.textEn })));
+    return c.json(await rd(c, (l) => l.verifiedProvisions(user.tenantId, date).map((p) => ({ instrument: p.instrument.titleAr, instrumentEn: p.instrument.titleEn, version: p.version.versionLabel, effectiveFrom: p.version.effectiveFrom, article: p.provision.number, textAr: p.provision.textAr, textEn: p.provision.textEn }))));
   });
-  app.post('/laws/instruments', async (c) => { const b = await c.req.json(); store.library.addInstrument(b, lp(c.get('user')), now()); return c.json(b, 201); });
+  app.post('/laws/instruments', async (c) => { const b = await c.req.json(); await wr(c, (l, u) => l.addInstrument(b, u, now())); return c.json(b, 201); });
   // One upload: split into articles and go straight to review. The reviewer's single action is verify.
   app.post('/laws/versions', async (c) => {
-    const u = lp(c.get('user'));
-    const r = store.library.uploadVersion(await c.req.json(), u, now());
-    store.library.submitForReview(r.version.id, u, now());
+    const body = await c.req.json();
+    const r = await wr(c, (l, u) => {
+      const up = l.uploadVersion(body, u, now());
+      l.submitForReview(up.version.id, u, now());
+      return { ...up, version: l.versions.get(up.version.id)!, scope: l.instruments.get(up.version.instrumentId)!.tenantId };
+    });
     // Extraction runs in the background; the upload never waits on the model or fails because of it.
-    const inst = store.library.instruments.get(r.version.instrumentId)!;
-    void extractProposals(r.version, inst.tenantId, provider).then((x) => store.library.storeProposals(x.proposals)).catch(() => {});
-    return c.json({ ...r, version: store.library.versions.get(r.version.id) }, 201);
+    const tenantId = c.get('user').tenantId;
+    void extractProposals(r.version, r.scope, provider).then((x) => repo.lib(tenantId, 'write', (l) => l.storeProposals(x.proposals))).catch(() => {});
+    return c.json({ version: r.version, warnings: r.warnings }, 201);
   });
-  app.get('/laws/review', (c) => c.json(store.library.versionsFor(lp(c.get('user'))).map((v) => ({ ...v, proposals: store.library.proposalsFor(v.id, lp(c.get('user'))) }))));
+  app.get('/laws/review', async (c) => c.json(await rd(c, (l, u) => l.versionsFor(u).map((v) => ({ ...v, proposals: l.proposalsFor(v.id, u) })))));
   // File in, text out: nothing is stored as law until a person uploads the (edited) text and another verifies it.
   app.post('/laws/files', async (c) => {
     const u = lp(c.get('user'));
@@ -167,27 +186,29 @@ export function createApp(deps: AppDeps) {
     if (!(f instanceof File)) throw new FileError('NO_FILE');
     const bytes = new Uint8Array(await f.arrayBuffer());
     const out = await extractText(bytes);
-    store.files.set(out.sha256, { name: f.name, bytes, uploadedBy: u.id });
+    await repo.putFile(u.tenantId, { sha256: out.sha256, name: f.name, bytes, uploadedBy: u.id });
     return c.json({ text: out.text, kind: out.kind, sha256: out.sha256, warnings: out.warnings });
   });
-  app.post('/laws/bindings/sync', (c) => c.json(syncBindings(store.library, lp(c.get('user')), now())));
-  app.post('/laws/bindings/:id/reapprove', (c) => c.json(store.library.reapproveBinding(decodeURIComponent(c.req.param('id')), lp(c.get('user')), now())));
-  app.get('/laws/bindings', (c) => c.json([...store.library.bindings.values()]));
+  app.post('/laws/bindings/sync', async (c) => c.json(await wr(c, (l, u) => syncBindings(l, u, now()))));
+  app.post('/laws/bindings/:id/reapprove', async (c) => c.json(await wr(c, (l, u) => l.reapproveBinding(decodeURIComponent(c.req.param('id')), u, now()))));
+  app.get('/laws/bindings', async (c) => c.json(await rd(c, (l) => [...l.bindings.values()])));
   app.post('/laws/versions/:id/extract', async (c) => {
-    const u = lp(c.get('user'));
-    if (!store.library.canSeeProposals(c.req.param('id'), u)) throw new LegalError('SCOPE_MISMATCH');
-    const v = store.library.versions.get(c.req.param('id'))!;
-    const inst = store.library.instruments.get(v.instrumentId)!;
-    const x = await extractProposals(v, inst.tenantId, provider);
-    store.library.storeProposals(x.proposals);
+    const id = c.req.param('id');
+    const { v, scope } = await rd(c, (l, u) => {
+      if (!l.canSeeProposals(id, u)) throw new LegalError('SCOPE_MISMATCH');
+      const ver = l.versions.get(id)!;
+      return { v: ver, scope: l.instruments.get(ver.instrumentId)!.tenantId };
+    });
+    const x = await extractProposals(v, scope, provider);
+    await wr(c, (l) => l.storeProposals(x.proposals));
     return c.json({ proposals: x.proposals.length, droppedUnquoted: x.droppedUnquoted });
   });
-  app.post('/laws/proposals/:id/:decision', (c) => c.json(store.library.decideProposal(c.req.param('id'), c.req.param('decision') === 'accept', lp(c.get('user')))));
-  app.post('/laws/versions/:id/submit', (c) => c.json(store.library.submitForReview(c.req.param('id'), lp(c.get('user')), now())));
-  app.post('/laws/versions/:id/verify', async (c) => c.json(store.library.verify(c.req.param('id'), lp(c.get('user')), (await c.req.json()).note ?? '', now())));
-  app.post('/laws/versions/:id/reject', async (c) => c.json(store.library.reject(c.req.param('id'), lp(c.get('user')), (await c.req.json()).note ?? '', now())));
-  app.get('/laws/versions/:id', (c) => { const v = store.library.versions.get(c.req.param('id')); return v ? c.json(v) : nf(c); });
-  app.get('/laws/stale-rules', (c) => c.json(store.library.staleBindings()));
+  app.post('/laws/proposals/:id/:decision', async (c) => c.json(await wr(c, (l, u) => l.decideProposal(c.req.param('id'), c.req.param('decision') === 'accept', u))));
+  app.post('/laws/versions/:id/submit', async (c) => c.json(await wr(c, (l, u) => l.submitForReview(c.req.param('id'), u, now()))));
+  app.post('/laws/versions/:id/verify', async (c) => { const note = (await c.req.json()).note ?? ''; return c.json(await wr(c, (l, u) => l.verify(c.req.param('id'), u, note, now()))); });
+  app.post('/laws/versions/:id/reject', async (c) => { const note = (await c.req.json()).note ?? ''; return c.json(await wr(c, (l, u) => l.reject(c.req.param('id'), u, note, now()))); });
+  app.get('/laws/versions/:id', async (c) => { const v = await rd(c, (l) => l.versions.get(c.req.param('id'))); return v ? c.json(v) : nf(c); });
+  app.get('/laws/stale-rules', async (c) => c.json(await rd(c, (l) => l.staleBindings())));
 
   // ---- AI (always drafts) ------------------------------------------------------
   app.post('/ai/laws', async (c) => {
@@ -195,17 +216,18 @@ export function createApp(deps: AppDeps) {
     const b = await c.req.json<{ question: string; caseId?: string }>();
     let asOf = now().slice(0, 10);
     if (b.caseId) {
-      const cs = load(b.caseId, user);
+      const cs = await repo.tx(user.tenantId, (tx) => load(tx, b.caseId!, user));
       if (!cs) return nf(c);
       const d = (cs.fields.incidentDate ?? cs.fields.occurredAt) as string | undefined;
       if (typeof d === 'string') asOf = d.slice(0, 10); // law as it stood on the event date
     }
-    return c.json(await answerFromLaws({ question: b.question, tenantId: user.tenantId, asOf, library: store.library, provider, lang: c.get('lang') }));
+    const library = await rd(c, (l) => l);
+    return c.json(await answerFromLaws({ question: b.question, tenantId: user.tenantId, asOf, library, provider, lang: c.get('lang') }));
   });
   app.post('/ai/cases', async (c) => {
     const user = c.get('user');
     const b = await c.req.json<{ question: string }>();
-    const visible = [...store.cases.values()].filter((x) => x.tenantId === user.tenantId);
+    const visible = await repo.tx(user.tenantId, (tx) => tx.listCases());
     return c.json(await answerQuestion({ question: b.question, actor: user, cases: visible, defs: CASE_TYPES, provider }));
   });
 

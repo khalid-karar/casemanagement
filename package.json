@@ -9,18 +9,20 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "eval:ai": "echo 'eval harness not yet implemented'",
-    "start": "tsx src/api/server.ts"
+    "start": "tsx src/api/server.ts",
+    "migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.6",
-    "drizzle-orm": "^0.45.4",
     "hono": "^4.13.17",
     "mammoth": "^1.13.0",
+    "pg": "^8.23.1",
     "unpdf": "^2.1.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
     "tsx": "^4.20.0",
     "typescript": "~5.9.0",
     "vitest": "^5.1.0"

@@ -2,11 +2,14 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { createApp } from './app';
 import { Directory } from './auth';
-import { Store } from './store';
+import { MemoryRepo } from './repo';
+import { PgRepo } from './pg-repo';
 import { openAICompatProvider } from '../ai';
 
 const directory = new Directory();
-const store = new Store();
+const repo = process.env.DATABASE_URL
+  ? await PgRepo.connect(process.env.DATABASE_URL)
+  : (console.warn('DATABASE_URL not set: using in-memory storage. Data is lost on restart.'), new MemoryRepo());
 
 // Demo users for local development only.
 const T = '00000000-0000-0000-0000-000000000001';
@@ -27,7 +30,7 @@ const provider = openAICompatProvider({
   ...(process.env.LLM_API_KEY ? { apiKey: process.env.LLM_API_KEY } : {}),
 });
 
-const app = createApp({ store, directory, provider });
+const app = createApp({ repo, directory, provider });
 app.use('/*', serveStatic({ root: './web' }));
 const port = Number(process.env.PORT ?? 3000);
 serve({ fetch: app.fetch, port });
