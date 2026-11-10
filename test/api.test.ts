@@ -71,3 +71,12 @@ describe('API', () => {
     expect(JSON.stringify(await r.json())).not.toMatch(/Syntax|at /);
   });
 });
+
+describe('API legal readiness', () => {
+  it('exposes per-case-type legal status', async () => {
+    const app = build();
+    const r = (await (await call(app, 'mgr', 'GET', '/case-types')).json()) as any[];
+    expect(r.find((x) => x.key === 'hr.misconduct').legal.status).toBe('NEEDS_COUNSEL');
+    expect(r.find((x) => x.key === 'security.incident').legal.status).toBe('NO_STATUTORY_RULES_MAPPED');
+  });
+});

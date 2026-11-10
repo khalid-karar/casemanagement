@@ -72,7 +72,7 @@ export function createApp(deps: AppDeps) {
 
   // ---- Cases -----------------------------------------------------------------
   app.get('/case-types', (c) =>
-    c.json(Object.values(CASE_TYPES).map((d) => ({ key: d.key, domain: d.domain, label: d.label, legalReview: d.legalReview.status }))));
+    c.json(Object.values(CASE_TYPES).map((d) => ({ key: d.key, domain: d.domain, label: d.label, legalReview: d.legalReview.status, legal: legalStatus(store.library, d.key) }))));
 
   app.post('/cases', async (c) => {
     const user = c.get('user');
