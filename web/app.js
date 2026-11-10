@@ -7,7 +7,7 @@ const I = {
     verId:'معرّف النسخة', label:'وسم النسخة', eff:'تاريخ السريان', text:'النص الكامل (المادة 1 … المادة 2 …)', submit:'إرسال للمراجعة', verify:'توثيق (اعتماد)', reject:'رفض',
     draftNote:'نص غير موثّق: لا يراه المساعد الذكي ولا تُبنى عليه القواعد حتى يعتمده مراجع قانوني مختلف عن الرافع.',
     ask:'اسأل', askLaw:'سؤال عن الأنظمة', askCase:'سؤال عن القضايا', question:'السؤال', draft:'مسودة تتطلب مراجعة بشرية — ليست رأياً قانونياً',
-    citations:'المراجع', none:'لا شيء', noLaws:'لا توجد أنظمة موثّقة بعد', stale:'قواعد تحتاج إعادة اعتماد', article:'المادة', saved:'تم', err:'خطأ', ready:'جاهزية القواعد النظامية', syncB:'ربط القواعد بالأنظمة الموثّقة', st_READY:'جاهز', st_NEEDS_COUNSEL:'يحتاج اعتماد المستشار', st_NO_STATUTORY_RULES_MAPPED:'لا توجد قواعد نظامية مربوطة بعد', staleN:'قواعد متقادمة', unboundN:'غير مربوطة', tabReview:'مراجعة الأنظمة (للفريق)', source:'النص المصدر', findings:'ما استخرجه الذكاء الاصطناعي', accept:'قبول', rejectP:'رفض', pending:'بانتظار التوثيق', nothing:'لا توجد نسخ قيد المراجعة', aiOnly:'مقترحات الذكاء الاصطناعي تظهر لفريق المنصة فقط ولا يراها العملاء' },
+    citations:'المراجع', none:'لا شيء', noLaws:'لا توجد أنظمة موثّقة بعد', stale:'قواعد تحتاج إعادة اعتماد', article:'المادة', saved:'تم', err:'خطأ', engine:'محرك الذكاء الاصطناعي', engSov:'نموذجنا الخاص', engIk:'مزوّد سحابي داخل المملكة', consentT:'تفويض استخدام مزوّد داخل المملكة', inclP:'السماح بإرسال الأسماء والبيانات الشخصية', signName:'الاسم', signTitle:'المسمى الوظيفي', ack:'أقرّ بأنني مخوّل بالتوقيع وقرأت النص كاملاً', signB:'توقيع وتفعيل', revokeB:'سحب التفويض', signedBy:'وُقّع بواسطة', offNote:'لم يُفعَّل مزوّد سحابي لمنشأتك: لا تُرسل أي بيانات خارج بنيتنا.', noAi:'الذكاء الاصطناعي غير مفعّل', ready:'جاهزية القواعد النظامية', syncB:'ربط القواعد بالأنظمة الموثّقة', st_READY:'جاهز', st_NEEDS_COUNSEL:'يحتاج اعتماد المستشار', st_NO_STATUTORY_RULES_MAPPED:'لا توجد قواعد نظامية مربوطة بعد', staleN:'قواعد متقادمة', unboundN:'غير مربوطة', tabReview:'مراجعة الأنظمة (للفريق)', source:'النص المصدر', findings:'ما استخرجه الذكاء الاصطناعي', accept:'قبول', rejectP:'رفض', pending:'بانتظار التوثيق', nothing:'لا توجد نسخ قيد المراجعة', aiOnly:'مقترحات الذكاء الاصطناعي تظهر لفريق المنصة فقط ولا يراها العملاء' },
   en: { app:'Case Management Platform', user:'User', tabCases:'Cases', tabLaws:'Legal library', tabAi:'AI assistant',
     newCase:'New case', type:'Type', id:'ID', create:'Create', state:'State', open:'Open', back:'Back',
     actions:'Available actions', blockers:'Blockers', run:'Run', fields:'Fields', artifacts:'Artifacts', audit:'Audit log',
@@ -16,7 +16,7 @@ const I = {
     verId:'Version ID', label:'Version label', eff:'Effective from', text:'Full text (Article 1 … Article 2 …)', submit:'Submit for review', verify:'Verify (approve)', reject:'Reject',
     draftNote:'Unverified text: invisible to the AI and rules until a different legal reviewer approves it.',
     ask:'Ask', askLaw:'Ask about the laws', askCase:'Ask about cases', question:'Question', draft:'Draft requiring human review — not legal advice',
-    citations:'Citations', none:'None', noLaws:'No verified laws yet', stale:'Rules needing re-approval', article:'Article', saved:'Done', err:'Error', ready:'Legal rules readiness', syncB:'Bind rules to verified laws', st_READY:'Ready', st_NEEDS_COUNSEL:'Needs counsel', st_NO_STATUTORY_RULES_MAPPED:'No statutory rules mapped yet', staleN:'Stale rules', unboundN:'Unbound', tabReview:'Law review (team)', source:'Source text', findings:'AI-extracted findings', accept:'Accept', rejectP:'Reject', pending:'Awaiting verification', nothing:'No versions under review', aiOnly:'AI proposals are visible to the platform team only, never to clients' },
+    citations:'Citations', none:'None', noLaws:'No verified laws yet', stale:'Rules needing re-approval', article:'Article', saved:'Done', err:'Error', engine:'AI engine', engSov:'Our own model', engIk:'In-Kingdom cloud provider', consentT:'Authorisation to use an in-Kingdom provider', inclP:'Allow names and personal data to be sent', signName:'Name', signTitle:'Job title', ack:'I am authorised to sign and have read the full text', signB:'Sign and enable', revokeB:'Withdraw authorisation', signedBy:'Signed by', offNote:'No cloud provider is enabled for your organisation: no data leaves our infrastructure.', noAi:'AI is not enabled', ready:'Legal rules readiness', syncB:'Bind rules to verified laws', st_READY:'Ready', st_NEEDS_COUNSEL:'Needs counsel', st_NO_STATUTORY_RULES_MAPPED:'No statutory rules mapped yet', staleN:'Stale rules', unboundN:'Unbound', tabReview:'Law review (team)', source:'Source text', findings:'AI-extracted findings', accept:'Accept', rejectP:'Reject', pending:'Awaiting verification', nothing:'No versions under review', aiOnly:'AI proposals are visible to the platform team only, never to clients' },
 };
 let lang = localStorage.getItem('lang') || 'ar';
 let user = localStorage.getItem('user') || 'hr-mgr';
@@ -25,7 +25,7 @@ let openId = null;
 const t = (k) => I[lang][k];
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const USERS = ['hr-mgr', 'hr-inv', 'hr-dir', 'counsel', 'editor', 'verifier'];
+const USERS = ['hr-mgr', 'hr-inv', 'hr-dir', 'client-admin', 'counsel', 'editor', 'verifier'];
 const BACKOFFICE = ['editor', 'verifier'];
 
 async function api(method, path, body) {
@@ -135,16 +135,42 @@ async function viewReview() {
   document.querySelectorAll('[data-vr]').forEach((b) => (b.onclick = async () => { flash(await api('POST', `/laws/versions/${encodeURIComponent(b.dataset.vr)}/reject`, { note: 'rejected' })); render(); }));
 }
 
-function viewAi() {
+async function viewAi() {
+  const st = await api('GET', '/ai/settings');
+  const S = st.j || {};
+  const label = (e) => (e ? `${e.mode === 'in_kingdom' ? t('engIk') : t('engSov')} — ${esc(e.label)}` : t('noAi'));
+  const isAdmin = user === 'client-admin';
   $('#view').innerHTML = `<div class="card"><h3>${t('tabAi')}</h3><div class="warn">${t('draft')}</div>
+  <p class="mute">${t('engine')}: <b>${label(S.current)}</b></p>
   <textarea id="q" rows="3" style="width:100%" placeholder="${t('question')}"></textarea>
-  <div class="row"><button id="al">${t('askLaw')}</button><button class="alt" id="ac">${t('askCase')}</button></div><div id="ans"></div></div>`;
-  const show = (r) => { const a = r.j; $('#ans').innerHTML = `<pre>${esc(a.text ?? a.message)}</pre><div class="mute">${t('citations')}: ${(a.citations || []).map((c) => esc(c.article ? `${c.instrument} ${t('article')} ${c.article} (${c.versionLabel})` : c)).join(' · ') || t('none')}</div>`; };
+  <div class="row"><button id="al">${t('askLaw')}</button><button class="alt" id="ac">${t('askCase')}</button></div><div id="ans"></div></div>
+  <div id="consent"></div>`;
+  const show = (r) => { const a = r.j; $('#ans').innerHTML = `<pre>${esc(a.text ?? a.message)}</pre><div class="mute">${t('citations')}: ${(a.citations || []).map((c) => esc(c.article ? `${c.instrument} ${t('article')} ${c.article} (${c.versionLabel})` : c)).join(' · ') || t('none')}${a.engine ? ' · ' + t('engine') + ': ' + esc(a.engine.label) : ''}</div>`; };
   $('#al').onclick = async () => show(await api('POST', '/ai/laws', { question: $('#q').value }));
   $('#ac').onclick = async () => show(await api('POST', '/ai/cases', { question: $('#q').value }));
+  if (!isAdmin) return;
+  const c = S.consent && !S.consent.revokedAt && S.mode === 'IN_KINGDOM_API' ? S.consent : null;
+  if (c) {
+    $('#consent').innerHTML = `<div class="card"><h3>${t('consentT')}</h3><p>${t('signedBy')}: <b>${esc(c.signedByName)}</b> (${esc(c.signedByTitle)}) · ${esc(c.signedAt)}<br><span class="mute">${esc(c.providerName)} · ${esc(c.region)} · v${esc(c.version)}</span></p><button class="alt" id="rv">${t('revokeB')}</button></div>`;
+    $('#rv').onclick = async () => { flash(await api('DELETE', '/ai/consent')); render(); };
+    return;
+  }
+  if (!S.inKingdomOffered) { $('#consent').innerHTML = `<div class="card mute">${t('offNote')}</div>`; return; }
+  const draw = async () => {
+    const ip = $('#ip')?.checked === true;
+    const tx = (await api('GET', '/ai/consent-text?includePersonal=' + ip)).j;
+    const body = (lang === 'ar' ? tx.ar : tx.en).map((l) => `<li>${esc(l)}</li>`).join('');
+    $('#consent').innerHTML = `<div class="card"><h3>${t('consentT')}</h3><div class="warn">${t('offNote')}</div><ul>${body}</ul>
+      <label><input type="checkbox" id="ip" ${ip ? 'checked' : ''}> ${t('inclP')}</label>
+      <div class="row" style="margin-top:8px"><input id="sn" placeholder="${t('signName')}"><input id="st" placeholder="${t('signTitle')}"></div>
+      <label><input type="checkbox" id="ak"> ${t('ack')}</label><div><button id="sg">${t('signB')}</button></div></div>`;
+    $('#ip').onchange = draw;
+    $('#sg').onclick = async () => { flash(await api('POST', '/ai/consent', { includePersonal: $('#ip').checked, name: $('#sn').value, title: $('#st').value, textSha256: tx.sha256, acknowledge: $('#ak').checked })); render(); };
+  };
+  draw();
 }
 
-async function render() { chrome(); if (tab === 'cases') await viewCases(); else if (tab === 'review') await viewReview(); else if (tab === 'laws') await viewLaws(); else viewAi(); }
+async function render() { chrome(); if (tab === 'cases') await viewCases(); else if (tab === 'review') await viewReview(); else if (tab === 'laws') await viewLaws(); else await viewAi(); }
 document.addEventListener('click', (e) => {
   const o = e.target.closest('[data-open]'); if (o) { openId = o.dataset.open; render(); }
   const tb = e.target.closest('[data-tab]'); if (tb) { tab = tb.dataset.tab; openId = null; render(); }

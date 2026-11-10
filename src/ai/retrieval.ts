@@ -1,4 +1,4 @@
-import { canAccess, redactForActor } from '../engine/permissions';
+import { REDACTED, canAccess, redactForActor } from '../engine/permissions';
 import type { Actor, CaseState, CaseTypeDefinition } from '../engine/types';
 
 export interface Chunk {
@@ -11,17 +11,34 @@ export interface Chunk {
  * Permission-filtered retrieval. The actor's access is checked BEFORE anything is read into a
  * chunk, and fields are redacted for that actor, so the model can never see what the user can't.
  */
+export interface ExternalPolicy {
+  /** Set when the content will leave our own infrastructure. */
+  external: boolean;
+  includePersonal: boolean;
+}
+
 export function buildChunks(
   cases: CaseState[],
   defs: Record<string, CaseTypeDefinition>,
   actor: Actor,
+  policy: ExternalPolicy = { external: false, includePersonal: true },
 ): Chunk[] {
   const out: Chunk[] = [];
   for (const raw of cases) {
     if (!canAccess(actor, raw, 'read').allowed) continue;
     const def = defs[raw.caseTypeKey];
     if (!def) continue;
+    // Privileged legal matters never leave our infrastructure, whatever the user may see.
+    if (policy.external && raw.confidentiality === 'PRIVILEGED') continue;
     const c = redactForActor(def, raw, actor);
+    if (policy.external) {
+      // Data minimisation for the external provider, applied even to users who are allowed to see these fields.
+      c.fields = { ...c.fields };
+      for (const f of def.fields) {
+        if (!(f.key in c.fields)) continue;
+        if (f.sensitivity === 'SEALED' || (f.sensitivity === 'PERSONAL' && !policy.includePersonal)) c.fields[f.key] = REDACTED;
+      }
+    }
     const fields = Object.entries(c.fields).map(([k, v]) => `${k}: ${String(v)}`).join('\n');
     out.push({ id: `${c.id}:fields`, caseId: c.id, text: `Case ${c.id} (${def.key}, state ${c.state})\n${fields}` });
     for (const a of c.artifacts) {

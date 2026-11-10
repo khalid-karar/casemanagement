@@ -4,7 +4,9 @@ import type { AuditEvent, AuditEventInput, CaseState } from '../engine';
 import { LegalLibrary } from '../legal';
 import type { Instrument, InstrumentVersion, RuleBinding } from '../legal';
 import type { Proposal } from '../legal';
-import type { Repo, Tx } from './repo';
+import type { AiLogEntry, Repo, Tx } from './repo';
+import type { AiSettings } from '../ai/consent';
+import { defaultSettings } from '../ai/consent';
 
 const LEGAL_LOCK = 7001;
 
@@ -120,6 +122,26 @@ export class PgRepo implements Repo {
       await c.query('INSERT INTO legal_files (sha256,scope_tenant_id,name,bytes,uploaded_by) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (sha256) DO NOTHING',
         [f.sha256, tenantId === 'platform' ? null : tenantId, f.name, Buffer.from(f.bytes), f.uploadedBy]);
     });
+  }
+
+  getAiSettings(tenantId: string) {
+    return this.run(tenantId, async (c) => {
+      const r = await c.query('SELECT data FROM tenant_ai_settings WHERE tenant_id = $1', [tenantId]);
+      return (r.rows[0]?.data as AiSettings | undefined) ?? defaultSettings(tenantId);
+    });
+  }
+  saveAiSettings(tenantId: string, s: AiSettings, e: AiLogEntry) {
+    return this.run(tenantId, async (c) => {
+      await c.query('INSERT INTO tenant_ai_settings (tenant_id, mode, data) VALUES ($1,$2,$3) ON CONFLICT (tenant_id) DO UPDATE SET mode = EXCLUDED.mode, data = EXCLUDED.data', [tenantId, s.mode, JSON.stringify(s)]);
+      await c.query('INSERT INTO ai_log (tenant_id, at, actor_id, type, data) VALUES ($1,$2,$3,$4,$5)', [tenantId, e.at, e.actorId, e.type, JSON.stringify(e.data)]);
+    });
+  }
+  logAi(tenantId: string, e: AiLogEntry) {
+    return this.run(tenantId, async (c) => { await c.query('INSERT INTO ai_log (tenant_id, at, actor_id, type, data) VALUES ($1,$2,$3,$4,$5)', [tenantId, e.at, e.actorId, e.type, JSON.stringify(e.data)]); });
+  }
+  listAiLog(tenantId: string, limit: number) {
+    return this.run(tenantId, async (c) =>
+      (await c.query('SELECT at, actor_id, type, data FROM ai_log WHERE tenant_id = $1 ORDER BY id DESC LIMIT $2', [tenantId, limit])).rows.map((r) => ({ at: r.at, actorId: r.actor_id, type: r.type, data: r.data })));
   }
 
   verifyChain(e: AuditEvent[]) { return verifyChain(e); }

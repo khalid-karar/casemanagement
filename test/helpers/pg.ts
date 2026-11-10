@@ -18,8 +18,10 @@ export async function resetData() {
   const c = new pg.Client({ connectionString: ADMIN });
   await c.connect();
   await c.query('ALTER TABLE audit_events DISABLE TRIGGER audit_no_truncate');
-  await c.query('TRUNCATE cases, audit_events, legal_instruments, legal_versions, legal_bindings, legal_proposals, legal_files, legal_log');
+  await c.query('ALTER TABLE ai_log DISABLE TRIGGER ai_log_no_truncate');
+  await c.query('TRUNCATE cases, audit_events, legal_instruments, legal_versions, legal_bindings, legal_proposals, legal_files, legal_log, tenant_ai_settings, ai_log');
   await c.query('ALTER TABLE audit_events ENABLE TRIGGER audit_no_truncate');
+  await c.query('ALTER TABLE ai_log ENABLE TRIGGER ai_log_no_truncate');
   await c.end();
 }
 export const newRepo = () => PgRepo.connect(APP!);

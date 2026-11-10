@@ -12,10 +12,17 @@ import type { LegalLibrary } from '../legal';
 import { ocrAvailable } from '../legal/ocr';
 import type { VisionOcr } from '../legal';
 import { legalStatus, syncBindings } from '../case-types/legal-sources';
-import { answerFromLaws, answerQuestion } from '../ai';
-import type { ChatProvider } from '../ai';
+import { CONSENT_VERSION, answerFromLaws, answerQuestion, consentHash, consentText, selectProvider } from '../ai';
+import type { AiProviders, ChatProvider, InKingdomProvider } from '../ai';
 
-export interface AppDeps { repo: Repo; paidOcr?: VisionOcr; directory: Directory; provider: ChatProvider; clock?: () => string }
+export interface AppDeps {
+  repo: Repo; paidOcr?: VisionOcr; directory: Directory;
+  /** Our own (sovereign) model. */
+  provider?: ChatProvider;
+  /** External in-Kingdom provider, usable only for tenants with a valid signed consent. */
+  inKingdom?: InKingdomProvider;
+  clock?: () => string;
+}
 type Env = { Variables: { user: Principal; lang: 'ar' | 'en' } };
 
 const T = {
@@ -34,7 +41,8 @@ const pickLang = (q: string | undefined, h: string | undefined): 'ar' | 'en' =>
 const STATIC = new Set(['/', '/index.html', '/app.js', '/style.css', '/favicon.ico']);
 
 export function createApp(deps: AppDeps) {
-  const { repo, directory, provider, paidOcr } = deps;
+  const { repo, directory, paidOcr } = deps;
+  const providers: AiProviders = { ...(deps.provider ? { sovereign: deps.provider } : {}), ...(deps.inKingdom ? { inKingdom: deps.inKingdom } : {}) };
   const now = deps.clock ?? (() => new Date().toISOString());
   const app = new Hono<Env>();
 
@@ -175,7 +183,8 @@ export function createApp(deps: AppDeps) {
     });
     // Extraction runs in the background; the upload never waits on the model or fails because of it.
     const tenantId = c.get('user').tenantId;
-    void extractProposals(r.version, r.scope, provider).then((x) => repo.lib(tenantId, 'write', (l) => l.storeProposals(x.proposals))).catch(() => {});
+    const pick = selectProvider('platform', { tenantId: 'platform', mode: 'SOVEREIGN' }, providers);
+    if (pick.ok) void extractProposals(r.version, r.scope, pick.provider).then((x) => repo.lib(tenantId, 'write', (l) => l.storeProposals(x.proposals))).catch(() => {});
     return c.json({ version: r.version, warnings: r.warnings }, 201);
   });
   app.get('/laws/review', async (c) => c.json(await rd(c, (l, u) => l.versionsFor(u).map((v) => ({ ...v, proposals: l.proposalsFor(v.id, u) })))));
@@ -202,7 +211,9 @@ export function createApp(deps: AppDeps) {
       const ver = l.versions.get(id)!;
       return { v: ver, scope: l.instruments.get(ver.instrumentId)!.tenantId };
     });
-    const x = await extractProposals(v, scope, provider);
+    const pick = selectProvider('platform', { tenantId: 'platform', mode: 'SOVEREIGN' }, providers);
+    if (!pick.ok) throw new LegalError('NO_AI_PROVIDER');
+    const x = await extractProposals(v, scope, pick.provider);
     await wr(c, (l) => l.storeProposals(x.proposals));
     return c.json({ proposals: x.proposals.length, droppedUnquoted: x.droppedUnquoted });
   });
@@ -214,9 +225,17 @@ export function createApp(deps: AppDeps) {
   app.get('/laws/stale-rules', async (c) => c.json(await rd(c, (l) => l.staleBindings())));
 
   // ---- AI (always drafts) ------------------------------------------------------
+  const engineOf = (sel: Extract<ReturnType<typeof selectProvider>, { ok: true }>) => ({ mode: sel.mode, label: sel.label });
+  const choose = async (user: Principal) => selectProvider(user.tenantId, await repo.getAiSettings(user.tenantId), providers);
+  const unavailable = (c: any) => c.json({ error: 'AI_UNAVAILABLE', message: c.get('lang') === 'ar' ? 'الذكاء الاصطناعي غير مفعّل لمنشأتك' : 'AI is not enabled for your organisation' }, 503);
+  const logCall = (user: Principal, kind: string, sel: Extract<ReturnType<typeof selectProvider>, { ok: true }>, extra: Record<string, unknown> = {}) =>
+    repo.logAi(user.tenantId, { at: now(), actorId: user.id, type: 'ai.call', data: { kind, mode: sel.mode, provider: sel.label, model: sel.provider.model, ...extra } });
+
   app.post('/ai/laws', async (c) => {
     const user = c.get('user');
     const b = await c.req.json<{ question: string; caseId?: string }>();
+    const sel = await choose(user);
+    if (!sel.ok) return unavailable(c);
     let asOf = now().slice(0, 10);
     if (b.caseId) {
       const cs = await repo.tx(user.tenantId, (tx) => load(tx, b.caseId!, user));
@@ -225,13 +244,63 @@ export function createApp(deps: AppDeps) {
       if (typeof d === 'string') asOf = d.slice(0, 10); // law as it stood on the event date
     }
     const library = await rd(c, (l) => l);
-    return c.json(await answerFromLaws({ question: b.question, tenantId: user.tenantId, asOf, library, provider, lang: c.get('lang') }));
+    const out = await answerFromLaws({ question: b.question, tenantId: user.tenantId, asOf, library, provider: sel.provider, lang: c.get('lang') });
+    await logCall(user, 'laws', sel, { answered: !out.noVerifiedSource });
+    return c.json({ ...out, engine: engineOf(sel) });
   });
   app.post('/ai/cases', async (c) => {
     const user = c.get('user');
     const b = await c.req.json<{ question: string }>();
+    const sel = await choose(user);
+    if (!sel.ok) return unavailable(c);
     const visible = await repo.tx(user.tenantId, (tx) => tx.listCases());
-    return c.json(await answerQuestion({ question: b.question, actor: user, cases: visible, defs: CASE_TYPES, provider }));
+    const out = await answerQuestion({ question: b.question, actor: user, cases: visible, defs: CASE_TYPES, provider: sel.provider, policy: { external: sel.external, includePersonal: sel.includePersonal } });
+    await logCall(user, 'cases', sel, { citations: out.citations.length });
+    return c.json({ ...out, engine: engineOf(sel) });
+  });
+
+  // ---- AI engine choice and signed consent (client admin only) -----------------------
+  const adminOnly = (user: Principal) => {
+    if (user.tenantId === 'platform' || !user.roles.includes('tenant_admin')) throw new AccessDeniedError('ROLE_REQUIRED:tenant_admin');
+  };
+  app.get('/ai/settings', async (c) => {
+    const user = c.get('user');
+    const s = await repo.getAiSettings(user.tenantId);
+    const sel = await choose(user);
+    return c.json({ mode: s.mode, consent: s.consent ?? null, current: sel.ok ? engineOf(sel) : null, inKingdomOffered: providers.inKingdom ? { name: providers.inKingdom.name, region: providers.inKingdom.region } : null, sovereignAvailable: Boolean(providers.sovereign) });
+  });
+  app.get('/ai/consent-text', (c) => {
+    const ik = providers.inKingdom;
+    if (!ik) return c.json({ error: 'NOT_OFFERED' }, 404);
+    const t = consentText({ providerName: ik.name, region: ik.region, includePersonal: c.req.query('includePersonal') === 'true' });
+    return c.json({ ...t, sha256: consentHash(t) });
+  });
+  app.post('/ai/consent', async (c) => {
+    const user = c.get('user');
+    adminOnly(user);
+    const ik = providers.inKingdom;
+    if (!ik) return c.json({ error: 'NOT_OFFERED' }, 404);
+    const b = await c.req.json<{ includePersonal?: boolean; name: string; title: string; textSha256: string; acknowledge: boolean }>();
+    const includePersonal = b.includePersonal === true;
+    const t = consentText({ providerName: ik.name, region: ik.region, includePersonal });
+    // The signer must submit the hash of the exact wording served to them: proof of what was shown.
+    if (b.acknowledge !== true || !b.name?.trim() || !b.title?.trim() || b.textSha256 !== consentHash(t)) throw new AccessDeniedError('CONSENT_INCOMPLETE');
+    const settings = { tenantId: user.tenantId, mode: 'IN_KINGDOM_API' as const, consent: { version: CONSENT_VERSION, textSha256: b.textSha256, signedByUserId: user.id, signedByName: b.name.trim(), signedByTitle: b.title.trim(), signedAt: now(), providerName: ik.name, region: ik.region, includePersonal } };
+    await repo.saveAiSettings(user.tenantId, settings, { at: now(), actorId: user.id, type: 'consent.signed', data: { version: CONSENT_VERSION, textSha256: b.textSha256, includePersonal, provider: ik.name, region: ik.region, signedByName: settings.consent.signedByName } });
+    return c.json(settings, 201);
+  });
+  app.delete('/ai/consent', async (c) => {
+    const user = c.get('user');
+    adminOnly(user);
+    const cur = await repo.getAiSettings(user.tenantId);
+    const next = { tenantId: user.tenantId, mode: 'SOVEREIGN' as const, ...(cur.consent ? { consent: { ...cur.consent, revokedAt: now(), revokedBy: user.id } } : {}) };
+    await repo.saveAiSettings(user.tenantId, next, { at: now(), actorId: user.id, type: 'consent.revoked', data: {} });
+    return c.json(next);
+  });
+  app.get('/ai/log', async (c) => {
+    const user = c.get('user');
+    adminOnly(user);
+    return c.json(await repo.listAiLog(user.tenantId, 200));
   });
 
   return app;

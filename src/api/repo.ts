@@ -1,6 +1,10 @@
 import { appendEvent, verifyChain } from '../engine';
 import type { AuditEvent, AuditEventInput, CaseState } from '../engine';
 import { LegalLibrary } from '../legal';
+import type { AiSettings } from '../ai/consent';
+import { defaultSettings } from '../ai/consent';
+
+export interface AiLogEntry { at: string; actorId: string; type: string; data: Record<string, unknown> }
 
 /** Everything inside one tenant-scoped transaction. */
 export interface Tx {
@@ -20,6 +24,11 @@ export interface Repo {
    */
   lib<T>(tenantId: string, mode: 'read' | 'write', fn: (lib: LegalLibrary) => Promise<T> | T): Promise<T>;
   putFile(tenantId: string, f: { sha256: string; name: string; bytes: Uint8Array; uploadedBy: string }): Promise<void>;
+  getAiSettings(tenantId: string): Promise<AiSettings>;
+  /** Saves the settings and appends the log entry in one transaction. */
+  saveAiSettings(tenantId: string, s: AiSettings, entry: AiLogEntry): Promise<void>;
+  logAi(tenantId: string, entry: AiLogEntry): Promise<void>;
+  listAiLog(tenantId: string, limit: number): Promise<AiLogEntry[]>;
   verifyChain(events: AuditEvent[]): ReturnType<typeof verifyChain>;
   close?(): Promise<void>;
 }
@@ -30,6 +39,12 @@ export class MemoryRepo implements Repo {
   private audit = new Map<string, AuditEvent[]>();
   private library = new LegalLibrary();
   files = new Map<string, { name: string; bytes: Uint8Array; uploadedBy: string }>();
+  private ai = new Map<string, AiSettings>();
+  private aiLog = new Map<string, AiLogEntry[]>();
+  async getAiSettings(t: string) { return this.ai.get(t) ?? defaultSettings(t); }
+  async saveAiSettings(t: string, s: AiSettings, e: AiLogEntry) { this.ai.set(t, s); await this.logAi(t, e); }
+  async logAi(t: string, e: AiLogEntry) { this.aiLog.set(t, [...(this.aiLog.get(t) ?? []), e]); }
+  async listAiLog(t: string, limit: number) { return (this.aiLog.get(t) ?? []).slice(-limit).reverse(); }
   private k = (t: string, id: string) => `${t}\u0000${id}`;
 
   async tx<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {

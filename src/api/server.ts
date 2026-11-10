@@ -19,17 +19,29 @@ const u = (id: string, name: string, departments: any, roles: string[], clearanc
 u('hr-mgr', 'HR Manager', ['HR'], ['hr_intake', 'hr_manager']);
 u('hr-inv', 'HR Investigator', ['HR'], ['hr_investigator']);
 u('hr-dir', 'HR Director', ['HR'], ['hr_director']);
+u('client-admin', 'Client Admin', ['HR'], ['tenant_admin']);
 u('counsel', 'In-house Counsel', ['LEGAL'], ['legal_counsel', 'general_counsel'], 'PRIVILEGED');
 u('editor', 'Legal Content Editor', ['LEGAL'], ['legal_content_editor'], 'RESTRICTED', 'platform');
 u('verifier', 'Legal Verifier (Counsel)', ['LEGAL'], ['legal_verifier'], 'RESTRICTED', 'platform');
 
-const baseUrl = process.env.LLM_BASE_URL ?? 'http://localhost:8000/v1';
-const provider = openAICompatProvider({
+// Sovereign model (own GPU). Optional: leave LLM_BASE_URL unset until a client needs own-model-only.
+const baseUrl = process.env.LLM_BASE_URL;
+const provider = baseUrl ? openAICompatProvider({
   baseUrl,
   model: process.env.LLM_MODEL ?? 'qwen3.8-27b',
   allowedHosts: (process.env.LLM_ALLOWED_HOSTS ?? new URL(baseUrl).hostname).split(','),
   ...(process.env.LLM_API_KEY ? { apiKey: process.env.LLM_API_KEY } : {}),
-});
+}) : undefined;
+
+// External in-Kingdom provider (Azure / Google / etc.): used only for tenants that signed the consent.
+const ikUrl = process.env.INKINGDOM_LLM_BASE_URL;
+if (ikUrl && (!process.env.INKINGDOM_LLM_REGION || !process.env.INKINGDOM_LLM_NAME || !process.env.INKINGDOM_LLM_MODEL || !process.env.INKINGDOM_LLM_ALLOWED_HOSTS)) {
+  throw new Error('INKINGDOM_LLM_NAME, _REGION, _MODEL and _ALLOWED_HOSTS are required with INKINGDOM_LLM_BASE_URL');
+}
+const inKingdom = ikUrl ? {
+  name: process.env.INKINGDOM_LLM_NAME!, region: process.env.INKINGDOM_LLM_REGION!,
+  provider: openAICompatProvider({ baseUrl: ikUrl, model: process.env.INKINGDOM_LLM_MODEL!, allowedHosts: process.env.INKINGDOM_LLM_ALLOWED_HOSTS!.split(','), ...(process.env.INKINGDOM_LLM_API_KEY ? { apiKey: process.env.INKINGDOM_LLM_API_KEY } : {}), ...(process.env.INKINGDOM_LLM_AUTH_HEADER ? { authHeader: process.env.INKINGDOM_LLM_AUTH_HEADER } : {}) }),
+} : undefined;
 
 // Optional paid OCR, used ONLY for national law uploaded by the platform team. Client uploads always stay on local OCR.
 if (process.env.PAID_OCR_API_KEY && !process.env.PAID_OCR_MODEL) throw new Error('PAID_OCR_MODEL is required when PAID_OCR_API_KEY is set');
@@ -41,7 +53,7 @@ const paidOcr = process.env.PAID_OCR_API_KEY
       apiKey: process.env.PAID_OCR_API_KEY,
     })
   : undefined;
-const app = createApp({ repo, directory, provider, ...(paidOcr ? { paidOcr } : {}) });
+const app = createApp({ repo, directory, ...(provider ? { provider } : {}), ...(inKingdom ? { inKingdom } : {}), ...(paidOcr ? { paidOcr } : {}) });
 app.use('/*', serveStatic({ root: './web' }));
 const port = Number(process.env.PORT ?? 3000);
 serve({ fetch: app.fetch, port });

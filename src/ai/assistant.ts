@@ -1,6 +1,6 @@
 import type { Actor, CaseState, CaseTypeDefinition } from '../engine/types';
 import type { ChatProvider } from './provider';
-import { buildChunks, rank, type Chunk } from './retrieval';
+import { buildChunks, rank, type Chunk, type ExternalPolicy } from './retrieval';
 
 export interface AiDraft {
   /** AI output is always a draft; a human approves before it is used or filed. */
@@ -33,8 +33,9 @@ export async function answerQuestion(input: {
   cases: CaseState[];
   defs: Record<string, CaseTypeDefinition>;
   provider: ChatProvider;
+  policy?: ExternalPolicy;
 }): Promise<AiDraft> {
-  const permitted = buildChunks(input.cases, input.defs, input.actor);
+  const permitted = buildChunks(input.cases, input.defs, input.actor, input.policy);
   const context = rank(permitted, input.question);
   const text = await input.provider.complete(buildPrompt(input.question, context));
   const allowed = new Set(context.map((c) => c.id));

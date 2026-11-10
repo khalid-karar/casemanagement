@@ -21,6 +21,8 @@ export interface OpenAICompatConfig {
   apiKey?: string;
   /** Hostnames inference may run on (in-Kingdom GPU hosts). Required, never defaulted. */
   allowedHosts: string[];
+  /** Header carrying the key. Default `authorization: Bearer <key>`; some clouds use e.g. `api-key`. */
+  authHeader?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -41,7 +43,7 @@ export function openAICompatProvider(cfg: OpenAICompatConfig): ChatProvider {
     async complete(messages, opts = {}) {
       const res = await doFetch(`${cfg.baseUrl.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}) },
+        headers: { 'content-type': 'application/json', ...(cfg.apiKey ? (cfg.authHeader ? { [cfg.authHeader]: cfg.apiKey } : { authorization: `Bearer ${cfg.apiKey}` }) : {}) },
         body: JSON.stringify({
           model: cfg.model,
           messages,

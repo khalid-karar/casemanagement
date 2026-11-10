@@ -115,6 +115,27 @@ describe.skipIf(!PG_ENABLED)('Postgres', () => {
     expect(audit.events).toHaveLength(2); // created + exactly one transition
   });
 
+  it('keeps AI consent across a restart, isolated per tenant, with an append-only log', async () => {
+    const mkApp = async () => {
+      const d = new Directory();
+      d.add({ id: 'admin', name: 'a', kind: 'human', tenantId: T1, departments: ['HR'], roles: ['tenant_admin'], reportsTo: [], clearance: 'RESTRICTED' });
+      d.add({ id: 'admin-b', name: 'b', kind: 'human', tenantId: T2, departments: ['HR'], roles: ['tenant_admin'], reportsTo: [], clearance: 'RESTRICTED' });
+      const ext: ChatProvider = { model: 'ext', complete: async () => 'x' };
+      return createApp({ repo: await newRepo(), directory: d, provider, inKingdom: { provider: ext, name: 'CloudX', region: 'Dammam' }, clock });
+    };
+    const a1 = await mkApp();
+    const t = (await (await call(a1, 'admin', 'GET', '/ai/consent-text?includePersonal=false')).json()) as any;
+    expect((await call(a1, 'admin', 'POST', '/ai/consent', { includePersonal: false, name: 'S', title: 'GC', textSha256: t.sha256, acknowledge: true })).status).toBe(201);
+    const a2 = await mkApp(); // restarted server
+    expect(((await (await call(a2, 'admin', 'GET', '/ai/settings')).json()) as any).mode).toBe('IN_KINGDOM_API');
+    expect(((await (await call(a2, 'admin-b', 'GET', '/ai/settings')).json()) as any).mode).toBe('SOVEREIGN');
+    expect((await sqlAs(T2, 'SELECT * FROM tenant_ai_settings')).rowCount).toBe(0);
+    expect((await sqlAs(T2, 'SELECT * FROM ai_log')).rowCount).toBe(0);
+    expect((await sqlAs(T1, 'SELECT * FROM ai_log')).rowCount).toBe(1);
+    await expect(sqlAs(T1, "UPDATE ai_log SET type = 'forged'")).rejects.toThrow(/permission denied|append-only/);
+    await expect(sqlAs(T1, 'DELETE FROM ai_log')).rejects.toThrow(/permission denied|append-only/);
+  });
+
   it('rejects a duplicate case id with 409, not a crash', async () => {
     const a = appFor(await newRepo());
     await call(a, 'mgr', 'POST', '/cases', { id: 'c1', caseType: 'hr.misconduct', fields: {} });
