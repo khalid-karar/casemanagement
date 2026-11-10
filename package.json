@@ -1,0 +1,31 @@
+{
+  "name": "casemanagement",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Configurable, Arabic-first, sovereign case management engine for HR, Security, Audit and Legal cases",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "eval:ai": "echo 'eval harness not yet implemented'"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.0",
+    "vitest": "^5.1.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
