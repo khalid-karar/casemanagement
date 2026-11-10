@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import {
   AccessDeniedError, ConflictOfInterestError, FieldError, TransitionBlockedError, addArtifact, addAction, applyTransition,
-  assignCase, canAccess, createCase, evaluateTransition, placeLegalHold, recordApproval, redactForActor, releaseLegalHold, setFields,
+  assignCase, canAccess, completeAction, createCase, evaluateTransition, placeLegalHold, recordApproval, redactForActor, releaseLegalHold, setFields,
 } from '../engine';
 import type { Principal } from './auth';
 import { Directory } from './auth';
@@ -18,9 +18,10 @@ import type { VisionOcr } from '../legal';
 import { legalStatus, syncBindings } from '../case-types/legal-sources';
 import { CONSENT_VERSION, answerFromLaws, answerQuestion, consentHash, consentText, selectProvider } from '../ai';
 import type { AiProviders, ChatProvider, InKingdomProvider } from '../ai';
+import { dashboard as buildDashboard, search as searchCases } from './summary';
 import { NajizError } from '../najiz/types';
 import type { NajizRegistry } from '../najiz/types';
-import { NajizRuleError, approverOf, assertMaySubmit, importUpdates, najizState, pendingArtifact, planPacket, reconcile, resolution } from '../najiz/workflow';
+import { NajizRuleError, approverOf, currentApprovals, assertMaySubmit, importUpdates, najizState, pendingArtifact, planPacket, reconcile, resolution } from '../najiz/workflow';
 
 export interface AppDeps {
   repo: Repo; paidOcr?: VisionOcr;
@@ -62,7 +63,7 @@ const T = {
 const pickLang = (q: string | undefined, h: string | undefined): 'ar' | 'en' =>
   q === 'en' || (!q && /^en/i.test(h ?? '')) ? 'en' : 'ar';
 
-const STATIC = new Set(['/', '/index.html', '/app.js', '/auth.js', '/style.css', '/favicon.ico', '/auth/config']);
+const STATIC = new Set(['/', '/index.html', '/auth.js', '/style.css', '/favicon.ico', '/auth/config']);
 
 export function createApp(deps: AppDeps) {
   const { repo, directory, paidOcr } = deps;
@@ -90,7 +91,7 @@ export function createApp(deps: AppDeps) {
     const idp = deps.authInfo?.issuer ? new URL(deps.authInfo.issuer).origin : '';
     c.header('content-security-policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ${idp}; frame-ancestors 'none'; base-uri 'none'; form-action 'self' ${idp}`.replace(/\s+;/g, ';'));
     c.header('cache-control', 'no-store');
-    if (c.req.path === '/health' || STATIC.has(c.req.path)) return next();
+    if (c.req.path === '/health' || STATIC.has(c.req.path) || /^\/ui\/[a-z0-9-]+\.js$/.test(c.req.path)) return next();
     const user = await directory.resolve(c.req.header('authorization'));
     if (!user) return c.json({ error: 'UNAUTHENTICATED', message: T.unauthenticated[c.get('lang')] }, 401);
     c.set('user', user);
@@ -144,24 +145,48 @@ export function createApp(deps: AppDeps) {
   app.get('/case-types', async (c) => {
     const lib = await repo.lib(c.get('user').tenantId, 'read', (l) => l);
     return c.json(Object.values(CASE_TYPES).map((d) => ({ key: d.key, domain: d.domain, label: d.label, legalReview: d.legalReview.status, legal: legalStatus(lib, d.key),
-      states: d.states.map((x) => ({ key: x.key, label: x.label })),
-      fields: d.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, options: f.options ?? null, sensitivity: f.sensitivity, lockedIn: f.lockedIn ?? [] })) })));
+      states: d.states.map((x) => ({ key: x.key, label: x.label, kind: x.kind ?? 'OPEN' })),
+      artifactTypes: [...new Set([...d.transitions.flatMap((t) => t.guards).flatMap((g: any) => (g.kind === 'artifact_present' ? [g.artifactType] : [])), 'evidence', ...(d.domain === 'LEGAL' ? ['exhibit'] : [])])],
+      fields: d.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, options: f.options ?? null, sensitivity: f.sensitivity, required: Boolean(f.required), lockedIn: f.lockedIn ?? [] })) })));
   });
 
   app.post('/cases', async (c) => {
     const user = c.get('user');
-    const b = await c.req.json<{ id: string; caseType: string; fields?: Record<string, unknown>; parties?: any[] }>();
+    const b = await c.req.json<{ id?: string; caseType: string; fields?: Record<string, unknown>; parties?: any[] }>();
     const def = CASE_TYPES[b.caseType];
     if (!def) return c.json({ error: 'UNKNOWN_CASE_TYPE' }, 400);
-    const m = createCase(def, { id: b.id, fields: b.fields ?? {}, parties: b.parties ?? [] }, user, now());
-    await repo.tx(user.tenantId, (tx) => tx.saveCase(m.case, m.event, true));
-    return c.json(view(m.case, user), 201);
+    // No id given: the server numbers the case (HR-2026-K7M2QX). Collisions are retried; a client-chosen id still works.
+    const prefix = { HR: 'HR', SECURITY: 'SEC', AUDIT: 'AUD', LEGAL: 'LEG' }[def.domain] ?? 'CS';
+    const gen = () => `${prefix}-${now().slice(0, 4)}-${Array.from(crypto.getRandomValues(new Uint8Array(6)), (x) => 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'[x % 31]).join('')}`;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const id = b.id || gen();
+      const m = createCase(def, { id, fields: b.fields ?? {}, parties: b.parties ?? [] }, user, now());
+      try { await repo.tx(user.tenantId, (tx) => tx.saveCase(m.case, m.event, true)); return c.json(view(m.case, user), 201); }
+      catch (e) { if (b.id || !((e as { code?: string }).code === '23505' || (e as Error).message === 'CASE_EXISTS')) throw e; }
+    }
+    return c.json({ error: 'CASE_EXISTS' }, 409);
   });
 
   app.get('/cases', async (c) => {
     const user = c.get('user');
     const all = await repo.tx(user.tenantId, (tx) => tx.listCases());
     return c.json(all.filter((x) => canAccess(user, x, 'read').allowed).map((x) => view(x, user)));
+  });
+
+  // Lists and the home page are built from redacted summaries (see summary.ts): no sealed or personal value can enter them.
+  app.get('/cases/search', async (c) => {
+    const user = c.get('user');
+    const q = c.req.query();
+    const all = await repo.tx(user.tenantId, (tx) => tx.listCases());
+    return c.json(searchCases(all, user, CASE_TYPES, now(), {
+      q: q['q'] ?? '', state: q['state'] ?? '', dept: q['dept'] ?? '', type: q['type'] ?? '', mine: q['mine'] === '1', open: q['open'] === '1', overdue: q['overdue'] === '1', due: Number(q['due']) || 0, needsAction: q['needs'] === '1',
+      sort: q['sort'] ?? 'updated', order: q['order'] === 'asc' ? 'asc' : 'desc', page: Number(q['page']) || 1, pageSize: Number(q['pageSize']) || 20,
+    }));
+  });
+  app.get('/dashboard', async (c) => {
+    const user = c.get('user');
+    const all = await repo.tx(user.tenantId, (tx) => tx.listCases());
+    return c.json(buildDashboard(all, user, CASE_TYPES, now()));
   });
 
   app.get('/cases/:id', async (c) => {
@@ -192,14 +217,14 @@ export function createApp(deps: AppDeps) {
     return out ? c.json(view(out, user)) : nf(c);
   });
 
-  const mutate = (fn: (cs: any, user: Principal, body: any) => { case: any; event: any }, action: 'write' | 'transition' = 'write') =>
+  const mutate = (fn: (cs: any, user: Principal, body: any, c: any) => { case: any; event: any }, action: 'write' | 'transition' = 'write') =>
     async (c: any) => {
       const user = c.get('user') as Principal;
-      const body = await c.req.json();
+      const body = await c.req.json().catch(() => ({}));
       const out = await repo.tx(user.tenantId, async (tx) => {
         const cs = await load(tx, c.req.param('id'), user, action, true);
         if (!cs) return undefined;
-        const m = fn(cs, user, body);
+        const m = fn(cs, user, body, c);
         await tx.saveCase(m.case, m.event);
         return m.case;
       });
@@ -209,6 +234,7 @@ export function createApp(deps: AppDeps) {
   app.post('/cases/:id/artifacts', mutate((cs, u, b) => addArtifact(cs, b, u, now())));
   app.post('/cases/:id/assignee', mutate((cs, u, b) => assignCase(cs, b, u, now())));
   app.post('/cases/:id/actions', mutate((cs, u, b) => addAction(cs, b, u, now())));
+  app.post('/cases/:id/actions/:aid/complete', mutate((cs, u, _b, c) => completeAction(cs, c.req.param('aid'), u, now())));
   app.post('/cases/:id/approvals', mutate((cs, u, b) => recordApproval(cs, b.role, u, now()), 'transition'));
   app.post('/cases/:id/legal-hold', mutate((cs, u, b) => placeLegalHold(cs, u, b.reason, now())));
   app.delete('/cases/:id/legal-hold', mutate((cs, u, b) => releaseLegalHold(cs, u, b.reason ?? '', now())));
@@ -283,7 +309,7 @@ export function createApp(deps: AppDeps) {
     let blockedBy: string | null = null;
     try { preview = planPacket(cs, nz.claimant, st.attempts).packet; } catch (e) { if (e instanceof NajizRuleError) blockedBy = e.code; else throw e; }
     if (!blockedBy) { try { assertMaySubmit(CASE_TYPES[cs.caseTypeKey]!, cs, user); } catch (e) { blockedBy = e instanceof NajizRuleError ? e.code : e instanceof AccessDeniedError ? e.reason : 'BLOCKED'; } }
-    return c.json({ enabled: true, simulated: nz.gw.simulated, configured: nz.gw.configured, gateway: nz.gw.name, ...st, canSubmit: !blockedBy && nz.gw.configured, blockedBy, preview });
+    return c.json({ enabled: true, simulated: nz.gw.simulated, configured: nz.gw.configured, gateway: nz.gw.name, ...st, canSubmit: !blockedBy && nz.gw.configured, blockedBy, approvedBy: currentApprovals(cs), preview });
   });
 
   app.post('/cases/:id/najiz/submit', async (c) => {

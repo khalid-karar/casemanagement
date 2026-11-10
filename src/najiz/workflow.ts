@@ -87,6 +87,12 @@ export function planPacket(cs: CaseState, claimant: FilingParty, attempts: numbe
   };
 }
 
+/** Approvals that currently count for the next attempt: general counsel, recorded after the last filing document or attempt. */
+export function currentApprovals(cs: CaseState): string[] {
+  const since = cs.artifacts.filter((a) => ATTACHABLE.includes(a.type) || a.type === NAJIZ_ARTIFACT.pending).reduce((m, a) => (a.createdAt > m ? a.createdAt : m), '');
+  return [...new Set(cs.approvals.filter((a) => a.role === 'general_counsel' && a.at > since).map((a) => a.approverId))];
+}
+
 /** Whether `actor` may send now. Throws NajizRuleError / AccessDeniedError / TransitionBlockedError (via evaluateTransition). */
 export function assertMaySubmit(def: CaseTypeDefinition, cs: CaseState, actor: Actor): NajizCaseState {
   if (cs.caseTypeKey !== 'legal.matter') throw new NajizRuleError('NOT_A_LEGAL_MATTER');

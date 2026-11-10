@@ -7,17 +7,25 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header>
-  <h1 id="appTitle"></h1>
-  <div class="bar">
-    <label><span data-i="user"></span> <select id="user"></select></label>
-    <span id="who"></span>
-    <button id="langBtn" type="button"></button>
-  </div>
-</header>
-<nav id="tabs"></nav>
-<main id="view"></main>
+<a class="skip" id="skip" href="#view"></a>
+<header class="top"><div class="top-in">
+  <h1 class="brand"><span class="logo" aria-hidden="true">ق</span><span id="appTitle"></span></h1>
+  <span class="spacer"></span>
+  <div class="who" id="who"></div>
+  <button id="digitsBtn" type="button"></button>
+  <button id="langBtn" type="button"></button>
+</div></header>
+<nav class="main" id="navWrap"><ul id="nav"></ul></nav>
+<main id="view" tabindex="-1"></main>
+<div id="toasts"></div>
 <script src="/auth.js"></script>
-<script src="/app.js"></script>
+<script src="/ui/kit.js"></script>
+<script src="/ui/labels.js"></script>
+<script src="/ui/forms.js"></script>
+<script src="/ui/home.js"></script>
+<script src="/ui/cases.js"></script>
+<script src="/ui/case.js"></script>
+<script src="/ui/laws.js"></script>
+<script src="/ui/main.js"></script>
 </body>
 </html>
