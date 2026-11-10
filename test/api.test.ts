@@ -1,0 +1,73 @@
+import { describe, expect, it } from 'vitest';
+import { createApp } from '../src/api/app';
+import { Directory } from '../src/api/auth';
+import { Store } from '../src/api/store';
+import type { ChatProvider } from '../src/ai';
+
+const T1 = '00000000-0000-0000-0000-000000000001';
+const T2 = '00000000-0000-0000-0000-000000000002';
+const provider: ChatProvider = { model: 't', complete: async () => 'draft' };
+function build() {
+  const d = new Directory();
+  const mk = (id: string, departments: any, roles: string[], tenantId = T1, clearance: any = 'RESTRICTED') =>
+    d.add({ id, name: id, kind: 'human', tenantId, departments, roles, reportsTo: [], clearance });
+  mk('mgr', ['HR'], ['hr_intake', 'hr_manager']);
+  mk('other-tenant', ['HR'], ['hr_manager'], T2);
+  mk('sec', ['SECURITY'], ['security_manager']);
+  mk('editor', ['LEGAL'], ['legal_content_editor'], 'platform');
+  mk('verifier', ['LEGAL'], ['legal_verifier'], 'platform');
+  return createApp({ store: new Store(), directory: d, provider, clock: () => '2026-11-10T08:00:00.000Z' });
+}
+const call = (app: ReturnType<typeof build>, who: string | null, method: string, path: string, body?: unknown) =>
+  app.request(path, { method, headers: { ...(who ? { authorization: `Bearer dev:${who}` } : {}), 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+
+describe('API', () => {
+  it('rejects unauthenticated requests', async () => {
+    expect((await call(build(), null, 'GET', '/cases')).status).toBe(401);
+  });
+  it('defaults to Arabic and returns English on request', async () => {
+    const app = build();
+    expect((await call(app, null, 'GET', '/cases')).headers.get('content-language')).toBe('ar');
+    expect((await call(app, null, 'GET', '/cases?lang=en')).headers.get('content-language')).toBe('en');
+  });
+  it('creates a case, reports blockers in Arabic, and enforces transitions', async () => {
+    const app = build();
+    expect((await call(app, 'mgr', 'POST', '/cases', { id: 'c1', caseType: 'hr.misconduct', fields: { allegationSummary: 'x' } })).status).toBe(201);
+    const blocked = await call(app, 'mgr', 'POST', '/cases/c1/transitions/triage'); // no severity
+    expect(blocked.status).toBe(409);
+    const body = (await blocked.json()) as any;
+    expect(body.blockers[0].message).toMatch(/[؀-ۿ]/);
+    await call(app, 'mgr', 'PATCH', '/cases/c1/fields', { severity: 'HIGH' });
+    expect((await call(app, 'mgr', 'POST', '/cases/c1/transitions/triage')).status).toBe(200);
+  });
+  it('hides cases across tenants and departments as 404', async () => {
+    const app = build();
+    await call(app, 'mgr', 'POST', '/cases', { id: 'c1', caseType: 'hr.misconduct', fields: {} });
+    expect((await call(app, 'other-tenant', 'GET', '/cases/c1')).status).toBe(404);
+    expect((await call(app, 'sec', 'GET', '/cases/c1')).status).toBe(404);
+    expect(((await (await call(app, 'sec', 'GET', '/cases')).json()) as any[]).length).toBe(0);
+  });
+  it('exposes a verifiable audit chain', async () => {
+    const app = build();
+    await call(app, 'mgr', 'POST', '/cases', { id: 'c1', caseType: 'hr.misconduct', fields: {} });
+    const a = (await (await call(app, 'mgr', 'GET', '/cases/c1/audit')).json()) as any;
+    expect(a.integrity.valid).toBe(true);
+    expect(a.events.length).toBe(1);
+  });
+  it('runs law upload → verify end-to-end with dual control', async () => {
+    const app = build();
+    await call(app, 'editor', 'POST', '/laws/instruments', { id: 'labour', tenantId: null, kind: 'LAW', titleAr: 'نظام العمل', issuer: 'MHRSD' });
+    const up = await call(app, 'editor', 'POST', '/laws/versions', { id: 'v1', instrumentId: 'labour', versionLabel: '1', effectiveFrom: '2005-01-01', rawText: 'المادة 71\nنص المادة' });
+    expect(up.status).toBe(201);
+    expect((await call(app, 'editor', 'POST', '/laws/versions/v1/verify', { note: 'x' })).status).toBe(403);
+    expect(((await (await call(app, 'mgr', 'GET', '/laws')).json()) as any[]).length).toBe(0);
+    expect((await call(app, 'verifier', 'POST', '/laws/versions/v1/verify', { note: 'ok' })).status).toBe(200);
+    expect(((await (await call(app, 'mgr', 'GET', '/laws')).json()) as any[]).length).toBe(1);
+  });
+  it('does not leak internals on bad input', async () => {
+    const app = build();
+    const r = await app.request('/cases', { method: 'POST', headers: { authorization: 'Bearer dev:mgr', 'content-type': 'application/json' }, body: '{bad' });
+    expect(r.status).toBe(400);
+    expect(JSON.stringify(await r.json())).not.toMatch(/Syntax|at /);
+  });
+});

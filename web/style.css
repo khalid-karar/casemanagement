@@ -1,0 +1,27 @@
+:root{--navy:#14284b;--gold:#b8923a;--bg:#f6f4ee;--card:#fff;--ink:#1d2433;--mute:#667085;--bad:#a4262c;--ok:#1b7f4b;--line:#e3dfd3}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 "Segoe UI",Tahoma,"Noto Naskh Arabic",system-ui,sans-serif}
+header{background:var(--navy);color:#fff;display:flex;justify-content:space-between;align-items:center;padding:12px 20px;flex-wrap:wrap;gap:8px;border-bottom:3px solid var(--gold)}
+h1{font-size:1.15rem;margin:0}
+.bar{display:flex;gap:12px;align-items:center}
+select,input,textarea,button{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink)}
+button{cursor:pointer;background:var(--navy);color:#fff;border-color:var(--navy)}
+button.alt{background:#fff;color:var(--navy)}
+button:disabled{opacity:.45;cursor:not-allowed}
+header button{background:var(--gold);border-color:var(--gold)}
+nav{display:flex;gap:4px;padding:10px 20px 0;flex-wrap:wrap}
+nav button{background:transparent;color:var(--navy);border:0;border-bottom:3px solid transparent;border-radius:0}
+nav button.on{border-bottom-color:var(--gold);font-weight:700}
+main{padding:16px 20px;max-width:1100px;margin:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grow{flex:1;min-width:180px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px;border-bottom:1px solid var(--line);text-align:start;vertical-align:top}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;background:#ece7d8;font-size:.85rem}
+.bad{color:var(--bad)}.ok{color:var(--ok)}.mute{color:var(--mute);font-size:.9rem}
+.warn{background:#fff6e0;border:1px solid var(--gold);padding:8px 12px;border-radius:8px;margin:8px 0}
+ul.blk{margin:4px 0 0;padding-inline-start:20px}
+pre{white-space:pre-wrap;background:#f3f1ea;padding:8px;border-radius:6px}
+a.lnk{color:var(--navy);cursor:pointer;text-decoration:underline}
+@media (max-width:600px){main{padding:12px}}

@@ -83,7 +83,7 @@ function evalGuard(g: Guard, c: CaseState, actor: Actor): Blocker | null {
     case 'role':
       return actor.roles.some((r) => g.anyOf.includes(r))
         ? null
-        : { code: 'ROLE_REQUIRED', message: `Requires one of: ${g.anyOf.join(', ')}` };
+        : { code: 'ROLE_REQUIRED', message: `Requires one of: ${g.anyOf.join(', ')}`, messageAr: `يتطلب أحد الأدوار: ${g.anyOf.join('، ')}` };
     case 'artifact_present':
       return c.artifacts.some((a) => a.type === g.artifactType)
         ? null
@@ -116,9 +116,9 @@ function evalGuard(g: Guard, c: CaseState, actor: Actor): Blocker | null {
     case 'approval':
       return c.approvals.some((a) => a.role === g.approverRole && a.approverId !== actor.id)
         ? null
-        : { code: `APPROVAL_REQUIRED:${g.approverRole}`, message: `Needs approval from ${g.approverRole} (someone other than the person acting)` };
+        : { code: `APPROVAL_REQUIRED:${g.approverRole}`, message: `Needs approval from ${g.approverRole} (someone other than the person acting)`, messageAr: `يتطلب موافقة ${g.approverRole} من شخص غير المنفّذ` };
     case 'assignee_set':
-      return c.assignee ? null : { code: 'ASSIGNEE_REQUIRED', message: 'An assignee must be set first' };
+      return c.assignee ? null : { code: 'ASSIGNEE_REQUIRED', message: 'An assignee must be set first', messageAr: 'يجب تحديد المسؤول أولاً' };
     case 'no_conflict_of_interest': {
       if (!c.assignee) return null;
       const codes = findConflicts(c.assignee, c.parties);
@@ -127,19 +127,19 @@ function evalGuard(g: Guard, c: CaseState, actor: Actor): Blocker | null {
     case 'actions_planned': {
       const bad = c.actions.filter((a) => a.status === 'OPEN' && (!a.ownerId || !a.dueDate));
       return bad.length
-        ? { code: 'ACTIONS_UNPLANNED', message: `Open actions need an owner and due date: ${bad.map((a) => a.id).join(', ')}` }
+        ? { code: 'ACTIONS_UNPLANNED', message: `Open actions need an owner and due date: ${bad.map((a) => a.id).join(', ')}`, messageAr: `الإجراءات المفتوحة تحتاج مسؤولاً وتاريخ استحقاق: ${bad.map((a) => a.id).join('، ')}` }
         : null;
     }
     case 'evidence_integrity': {
       const bad = c.artifacts.filter((a) => a.type === 'evidence' && !(a.hash && SHA256_HEX.test(a.hash)));
       return bad.length
-        ? { code: 'EVIDENCE_UNHASHED', message: `Evidence without a sha256 hash: ${bad.map((a) => a.id).join(', ')}` }
+        ? { code: 'EVIDENCE_UNHASHED', message: `Evidence without a sha256 hash: ${bad.map((a) => a.id).join(', ')}`, messageAr: `أدلة بدون بصمة sha256: ${bad.map((a) => a.id).join('، ')}` }
         : null;
     }
     case 'legal_hold_active':
-      return c.legalHold ? null : { code: 'LEGAL_HOLD_REQUIRED', message: 'A legal hold must be in place first' };
+      return c.legalHold ? null : { code: 'LEGAL_HOLD_REQUIRED', message: 'A legal hold must be in place first', messageAr: 'يجب تفعيل التجميد القانوني أولاً' };
     case 'not_on_legal_hold':
-      return c.legalHold ? { code: 'LEGAL_HOLD_ACTIVE', message: 'Blocked while a legal hold is in place' } : null;
+      return c.legalHold ? { code: 'LEGAL_HOLD_ACTIVE', message: 'Blocked while a legal hold is in place', messageAr: 'محظور أثناء سريان التجميد القانوني' } : null;
   }
 }
 
@@ -159,17 +159,17 @@ export function evaluateTransition(
   actor: Actor,
 ): Evaluation {
   const t = def.transitions.find((x) => x.action === action);
-  if (!t) return { allowed: false, blockers: [{ code: 'UNKNOWN_ACTION', message: `Unknown action "${action}"` }] };
+  if (!t) return { allowed: false, blockers: [{ code: 'UNKNOWN_ACTION', message: `Unknown action "${action}"`, messageAr: 'إجراء غير معروف' }] };
 
   const blockers: Blocker[] = [];
-  if (def.key !== c.caseTypeKey) blockers.push({ code: 'DEFINITION_MISMATCH', message: 'Case does not belong to this case type' });
-  if (actor.kind === 'ai') blockers.push({ code: 'AI_CANNOT_TRANSITION', message: 'AI output is a draft; a human must act' });
+  if (def.key !== c.caseTypeKey) blockers.push({ code: 'DEFINITION_MISMATCH', message: 'Case does not belong to this case type', messageAr: 'القضية لا تنتمي إلى هذا النوع' });
+  if (actor.kind === 'ai') blockers.push({ code: 'AI_CANNOT_TRANSITION', message: 'AI output is a draft; a human must act', messageAr: 'مخرجات الذكاء الاصطناعي مسودة؛ يجب أن يتصرف إنسان' });
 
   const access = canAccess(actor, c, 'transition');
-  if (!access.allowed) blockers.push({ code: access.reason ?? 'NO_ACCESS', message: 'Actor has no access to this case' });
+  if (!access.allowed) blockers.push({ code: access.reason ?? 'NO_ACCESS', message: 'Actor has no access to this case', messageAr: 'لا تملك صلاحية الوصول إلى هذه القضية' });
 
   if (!t.from.includes(c.state)) {
-    blockers.push({ code: 'INVALID_STATE', message: `"${action}" is not allowed from state ${c.state}` });
+    blockers.push({ code: 'INVALID_STATE', message: `"${action}" is not allowed from state ${c.state}`, messageAr: `الإجراء غير مسموح من الحالة ${c.state}` });
   }
   for (const g of t.guards) {
     const b = evalGuard(g, c, actor);
