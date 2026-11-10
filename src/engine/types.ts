@@ -37,6 +37,8 @@ export const FieldDef = z.object({
   required: z.boolean().default(false),
   options: z.array(z.string()).optional(),
   sensitivity: Sensitivity.default('NORMAL'),
+  /** States in which this field is frozen (every field is frozen once a case is CLOSED or ARCHIVED). */
+  lockedIn: z.array(z.string()).optional(),
 });
 export type FieldDef = z.infer<typeof FieldDef>;
 

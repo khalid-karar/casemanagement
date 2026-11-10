@@ -51,14 +51,16 @@ export const hrMisconduct = defineCaseType({
       label: { en: 'Investigation outcome', ar: 'نتيجة التحقيق' },
       type: 'enum',
       options: ['SUBSTANTIATED_PENALTY', 'SUBSTANTIATED_NO_PENALTY', 'UNSUBSTANTIATED'],
+      lockedIn: ['DECIDED', 'PENALTY_NOTIFIED'], // a decision, once taken, is not edited: it is superseded by a new case
     },
     {
       key: 'penaltyType',
       label: { en: 'Disciplinary penalty', ar: 'الجزاء التأديبي' },
       type: 'enum',
       options: ['WARNING', 'FINE_UP_TO_ONE_DAY_WAGE', 'FINE', 'SUSPENSION_WITHOUT_PAY', 'BONUS_DEPRIVATION', 'PROMOTION_DEFERRAL', 'DISMISSAL'],
+      lockedIn: ['DECIDED', 'PENALTY_NOTIFIED'],
     },
-    { key: 'decisionRationale', label: { en: 'Decision rationale', ar: 'مبررات القرار' }, type: 'longtext' },
+    { key: 'decisionRationale', label: { en: 'Decision rationale', ar: 'مبررات القرار' }, type: 'longtext', lockedIn: ['DECIDED', 'PENALTY_NOTIFIED'] },
   ],
   states: [
     { key: 'NEW', label: { en: 'New', ar: 'جديدة' } },

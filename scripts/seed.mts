@@ -164,7 +164,8 @@ async function seedTenantB() {
 }
 
 step(`seeding ${BASE} (auth: ${MODE})`);
-const health = await fetch(`${BASE}/health`).then((r) => r.json() as Promise<{ ocr: boolean; paidOcrForPlatformLaw: boolean }>).catch(() => null);
+const alive = await fetch(`${BASE}/health`).then((r) => r.ok).catch(() => false);
+const health = alive ? await fetch(`${BASE}/health/details`, { headers: { authorization: await auth('p-editor') } }).then((r) => r.json() as Promise<{ ocr: boolean; paidOcrForPlatformLaw: boolean }>).catch(() => null) : null;
 if (!health) { console.error(`Cannot reach ${BASE}. Start the server first (pnpm start:dev).`); process.exit(1); }
 console.log(`  server up — OCR available: ${health.ocr}, paid OCR for platform law: ${health.paidOcrForPlatformLaw}`);
 

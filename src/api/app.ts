@@ -1,13 +1,16 @@
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import {
-  AccessDeniedError, ConflictOfInterestError, TransitionBlockedError, addArtifact, addAction, applyTransition,
+  AccessDeniedError, ConflictOfInterestError, FieldError, TransitionBlockedError, addArtifact, addAction, applyTransition,
   assignCase, canAccess, createCase, evaluateTransition, placeLegalHold, recordApproval, redactForActor, releaseLegalHold, setFields,
 } from '../engine';
 import type { Principal } from './auth';
 import { Directory } from './auth';
 import type { Repo, Tx } from './repo';
+import { RateLimiter, isHeavyRoute } from './ratelimit';
 import { CASE_TYPES } from '../case-types';
 import { FileError, LegalError, extractProposals, extractText } from '../legal';
+import { MAX_BYTES } from '../legal/files';
 import type { LegalLibrary } from '../legal';
 import { ocrAvailable } from '../legal/ocr';
 import type { VisionOcr } from '../legal';
@@ -30,6 +33,10 @@ export interface AppDeps {
   /** External in-Kingdom provider, usable only for tenants with a valid signed consent. */
   inKingdom?: InKingdomProvider;
   clock?: () => string;
+  /** Per-user request limits per minute (see ratelimit.ts). Defaults: 300 general, 20 for AI/upload routes. */
+  limits?: { perMinute?: number; heavyPerMinute?: number };
+  /** Largest JSON body in bytes (default 1 MB). File uploads have their own cap. */
+  maxJsonBytes?: number;
 }
 type Env = { Variables: { user: Principal; lang: 'ar' | 'en' } };
 
@@ -40,6 +47,9 @@ const T = {
   blocked: { ar: 'لا يمكن تنفيذ الإجراء', en: 'Transition blocked' },
   conflict: { ar: 'تعارض مصالح', en: 'Conflict of interest' },
   badRequest: { ar: 'طلب غير صالح', en: 'Invalid request' },
+  tooMany: { ar: 'عدد الطلبات كبير، حاول لاحقاً', en: 'Too many requests, try again shortly' },
+  tooLarge: { ar: 'حجم الطلب أكبر من المسموح', en: 'Request body too large' },
+  locked: { ar: 'لا يمكن تعديل هذا الحقل في الحالة الحالية', en: 'This field cannot be changed in the current state' },
 } as const;
 
 /** Arabic is the default language; English when asked (?lang=en or Accept-Language: en). */
@@ -53,6 +63,15 @@ export function createApp(deps: AppDeps) {
   const providers: AiProviders = { ...(deps.provider ? { sovereign: deps.provider } : {}), ...(deps.inKingdom ? { inKingdom: deps.inKingdom } : {}) };
   const now = deps.clock ?? (() => new Date().toISOString());
   const app = new Hono<Env>();
+  const limiter = new RateLimiter();
+  const generalMax = deps.limits?.perMinute ?? 300;
+  const heavyMax = deps.limits?.heavyPerMinute ?? 20;
+
+  // Body size is capped before anything is read: JSON 1 MB, law file upload 25 MB plus multipart overhead.
+  const tooLarge = (c: any) => c.json({ error: 'PAYLOAD_TOO_LARGE', message: T.tooLarge[c.get('lang') as 'ar' | 'en'] }, 413);
+  const jsonCap = bodyLimit({ maxSize: deps.maxJsonBytes ?? 1024 * 1024, onError: tooLarge });
+  const fileCap = bodyLimit({ maxSize: MAX_BYTES + 1024 * 1024, onError: tooLarge });
+  app.use('*', async (c, next) => { c.set('lang', pickLang(c.req.query('lang'), c.req.header('accept-language'))); return (c.req.path === '/laws/files' ? fileCap : jsonCap)(c, next); });
 
   app.use('*', async (c, next) => {
     c.set('lang', pickLang(c.req.query('lang'), c.req.header('accept-language')));
@@ -62,12 +81,16 @@ export function createApp(deps: AppDeps) {
     c.header('referrer-policy', 'no-referrer');
     c.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
     const idp = deps.authInfo?.issuer ? new URL(deps.authInfo.issuer).origin : '';
-    c.header('content-security-policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${idp}; frame-ancestors 'none'; base-uri 'none'; form-action 'self' ${idp}`.replace(/\s+;/g, ';'));
+    c.header('content-security-policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ${idp}; frame-ancestors 'none'; base-uri 'none'; form-action 'self' ${idp}`.replace(/\s+;/g, ';'));
     c.header('cache-control', 'no-store');
     if (c.req.path === '/health' || STATIC.has(c.req.path)) return next();
     const user = await directory.resolve(c.req.header('authorization'));
     if (!user) return c.json({ error: 'UNAUTHENTICATED', message: T.unauthenticated[c.get('lang')] }, 401);
     c.set('user', user);
+    // Per-user limits, after sign-in so the key is the verified account, never a header the caller controls.
+    const heavy = isHeavyRoute(c.req.method, c.req.path);
+    const wait = limiter.take(`${heavy ? 'h' : 'g'}:${user.tenantId}:${user.id}`, { windowMs: 60_000, max: heavy ? heavyMax : generalMax });
+    if (wait) { c.header('retry-after', String(wait)); return c.json({ error: 'RATE_LIMITED', message: T.tooMany[c.get('lang')] }, 429); }
     return next();
   });
 
@@ -77,6 +100,7 @@ export function createApp(deps: AppDeps) {
       return c.json({ error: 'BLOCKED', message: T.blocked[lang], blockers: err.blockers.map((b) => ({ code: b.code, message: lang === 'ar' ? b.messageAr ?? b.message : b.message })) }, 409);
     }
     if (err instanceof AccessDeniedError) return c.json({ error: 'FORBIDDEN', reason: err.reason, message: T.forbidden[lang] }, 403);
+    if (err instanceof FieldError) return c.json({ error: err.kind === 'LOCKED' ? 'FIELD_LOCKED' : 'INVALID_FIELDS', problems: err.problems, message: err.kind === 'LOCKED' ? T.locked[lang] : T.badRequest[lang] }, err.kind === 'LOCKED' ? 409 : 400);
     if (err instanceof ConflictOfInterestError) return c.json({ error: 'CONFLICT_OF_INTEREST', codes: err.codes, message: T.conflict[lang] }, 409);
     if (err instanceof FileError) return c.json({ error: err.code, message: T.badRequest[lang] }, err.code === 'FILE_TOO_LARGE' ? 413 : err.code === 'OCR_NOT_INSTALLED' ? 503 : 400);
     if (err instanceof LegalError) return c.json({ error: err.code, message: T.forbidden[lang] }, err.code === 'UNKNOWN_VERSION' || err.code === 'UNKNOWN_INSTRUMENT' ? 404 : 403);
@@ -87,7 +111,12 @@ export function createApp(deps: AppDeps) {
 
   app.get('/auth/config', (c) => c.json(deps.authInfo ?? { mode: 'dev' }));
   app.get('/me', (c) => { const u = c.get('user'); return c.json({ id: u.id, name: u.name, tenantId: u.tenantId, roles: u.roles, departments: u.departments, kind: u.kind, clearance: u.clearance }); });
-  app.get('/health', async (c) => c.json({ ok: true, ocr: await ocrAvailable(), paidOcrForPlatformLaw: Boolean(paidOcr) }));
+  // Public liveness only. Capability details (OCR, paid OCR) need a platform sign-in.
+  app.get('/health', (c) => c.json({ ok: true }));
+  app.get('/health/details', async (c) => {
+    if (c.get('user').tenantId !== 'platform') return nf(c);
+    return c.json({ ok: true, ocr: await ocrAvailable(), paidOcrForPlatformLaw: Boolean(paidOcr) });
+  });
 
   // Not-found and not-permitted look identical so existence is not leaked across walls.
   const load = async (tx: Tx, id: string, user: Principal, action: 'read' | 'write' | 'transition' = 'read', lock = false) => {
@@ -106,7 +135,8 @@ export function createApp(deps: AppDeps) {
   // ---- Cases -----------------------------------------------------------------
   app.get('/case-types', async (c) => {
     const lib = await repo.lib(c.get('user').tenantId, 'read', (l) => l);
-    return c.json(Object.values(CASE_TYPES).map((d) => ({ key: d.key, domain: d.domain, label: d.label, legalReview: d.legalReview.status, legal: legalStatus(lib, d.key) })));
+    return c.json(Object.values(CASE_TYPES).map((d) => ({ key: d.key, domain: d.domain, label: d.label, legalReview: d.legalReview.status, legal: legalStatus(lib, d.key),
+      fields: d.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, options: f.options ?? null, sensitivity: f.sensitivity, lockedIn: f.lockedIn ?? [] })) })));
   });
 
   app.post('/cases', async (c) => {
@@ -166,7 +196,7 @@ export function createApp(deps: AppDeps) {
       });
       return out ? c.json(view(out, user)) : nf(c);
     };
-  app.patch('/cases/:id/fields', mutate((cs, u, b) => setFields(cs, b, u, now())));
+  app.patch('/cases/:id/fields', mutate((cs, u, b) => setFields(cs, b, u, now(), CASE_TYPES[cs.caseTypeKey]!)));
   app.post('/cases/:id/artifacts', mutate((cs, u, b) => addArtifact(cs, b, u, now())));
   app.post('/cases/:id/assignee', mutate((cs, u, b) => assignCase(cs, b, u, now())));
   app.post('/cases/:id/actions', mutate((cs, u, b) => addAction(cs, b, u, now())));

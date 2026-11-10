@@ -1,5 +1,6 @@
 import type { AuditEventInput } from './audit';
 import { canAccess } from './permissions';
+import { assertValidId, planFieldEdit, validateFields } from './fields';
 import type {
   Actor,
   Artifact,
@@ -218,6 +219,8 @@ export function createCase(
   now: string,
 ): Mutation {
   if (actor.kind === 'ai') throw new AccessDeniedError('AI_CANNOT_CREATE_CASE');
+  assertValidId(input.id, 'id');
+  validateFields(def, input.fields ?? {});
   const draft: CaseState = {
     id: input.id,
     tenantId: actor.tenantId,
@@ -252,11 +255,13 @@ export function createCase(
   };
 }
 
-export function setFields(c: CaseState, patch: Record<string, unknown>, actor: Actor, now: string): Mutation {
+export function setFields(c: CaseState, patch: Record<string, unknown>, actor: Actor, now: string, def: CaseTypeDefinition): Mutation {
   const access = canAccess(actor, c, 'write');
   if (!access.allowed) throw new AccessDeniedError(access.reason ?? 'NO_ACCESS');
+  const { next, changes, deniedSealed } = planFieldEdit(def, c, patch, actor);
+  if (deniedSealed.length) throw new AccessDeniedError(`SEALED_FIELD_WRITE:${deniedSealed.join(',')}`);
   return {
-    case: { ...c, fields: { ...c.fields, ...patch } },
+    case: { ...c, fields: next },
     event: {
       caseId: c.id,
       tenantId: c.tenantId,
@@ -264,7 +269,8 @@ export function setFields(c: CaseState, patch: Record<string, unknown>, actor: A
       actorId: actor.id,
       actorKind: actor.kind,
       at: now,
-      payload: { fields: Object.keys(patch) },
+      // Old and new value for ordinary fields; SHA-256 only for personal and sealed ones.
+      payload: { changes },
     },
   };
 }
@@ -278,6 +284,7 @@ export function addArtifact(
 ): Mutation {
   const access = canAccess(actor, c, 'write');
   if (!access.allowed) throw new AccessDeniedError(access.reason ?? 'NO_ACCESS');
+  assertValidId(input.id, 'artifact.id');
   if (c.artifacts.some((a) => a.id === input.id)) throw new AccessDeniedError('ARTIFACT_ID_EXISTS');
   const artifact: Artifact = {
     id: input.id,
@@ -352,6 +359,7 @@ export function addAction(
 ): Mutation {
   const access = canAccess(actor, c, 'write');
   if (!access.allowed) throw new AccessDeniedError(access.reason ?? 'NO_ACCESS');
+  assertValidId(input.id, 'action.id');
   return {
     case: {
       ...c,

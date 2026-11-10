@@ -4,31 +4,33 @@ Read this before testing. Anything here is **already known**: report it only if 
 
 Evidence labels: **Verified** = reproduced by running the code. **Code review** = read in the source, not yet exercised: please confirm and report the result either way.
 
-## A. Fixed while preparing this pack — please re-test
+## A. Fixed while preparing this pack: please re-test
 
-| # | What was wrong | Status |
+Each has an automated test (`test/qa-matrix.test.ts`, `test/roles.test.ts`, `test/hardening.test.ts`) that was checked by deliberately breaking the code and confirming the test fails. Re-prove each by hand and through real sign-in.
+
+| # | What was wrong | Now |
 |---|---|---|
-| F1 | **Sealed reporter identity leaked through write responses.** `GET` redacted it correctly, but `PATCH /cases/:id/fields`, `POST …/transitions/:action`, `…/artifacts`, `…/actions`, `…/assignee`, `…/approvals`, `…/legal-hold` and `POST /cases` returned the stored case unredacted. Any HR manager could read the whistleblower's identity from a no-op edit. | **Fixed and verified.** Every route that returns a case now goes through one redaction function. Regression test: `test/qa-matrix.test.ts` ("sealed identity is not readable back from any write route"). **Re-test every write route as `a-hr-mgr`, `a-sec-mgr`, `a-assurance`, `a-low`.** |
-| F2 | **Two roles stripped from every real token.** `audit_assurance` (read-across) and `case_manager` (export) are used by the permission model but were missing from the token role filter, so they worked in dev mode and silently did not exist under Keycloak. | **Fixed and verified** (`test/roles.test.ts`). The test now reads `permissions.ts`, so a new role cannot be forgotten. |
+| F1 | **Sealed reporter identity leaked through write responses.** `GET` redacted it, but `PATCH fields`, `POST …/transitions/:action`, `…/artifacts`, `…/actions`, `…/assignee`, `…/approvals`, `…/legal-hold` and `POST /cases` returned the stored case unredacted. | Every route that returns a case goes through one redaction function. **Re-test every write route as `a-hr-mgr`, `a-sec-mgr`, `a-assurance`, `a-low`.** |
+| F2 | **Two roles stripped from every real token.** `audit_assurance` and `case_manager` worked in dev mode and silently did not exist under Keycloak. | Added; a test reads `permissions.ts` so a new role cannot be forgotten. |
+| F3 (was S1) | **No rate limiting, no body-size limit.** | Per-account limit: 300 requests/min, and 20/min on AI and law-upload routes (`429` with `Retry-After`). JSON bodies over 1 MB get `413`; law uploads are capped at 26 MB. The limiter is keyed on the verified account, not on any header. It is per server instance and in memory; **IP-level limits, bot protection and volumetric DoS belong at the gateway/WAF**, and login brute force at Keycloak. |
+| F4 (was S2) | **Field edits were not validated and not locked.** Any key, any value, in any state. | Only fields the case type defines, with the right type, enum option, date (`YYYY-MM-DD`, real calendar date) and length; unknown fields and the `[REDACTED]` marker are rejected (`400`, with the offending fields named). **Nothing is editable once a case is CLOSED or ARCHIVED** (`409 FIELD_LOCKED`). In HR, `outcome`, `penaltyType` and `decisionRationale` freeze when the case is DECIDED. The same validation applies when a case is created. Other case types freeze only at close; counsel/owners should say which further fields should freeze earlier. |
+| F5 (was S3) | **Audit recorded only which fields changed.** | Records old and new value. **Personal and sealed fields are recorded as SHA-256 only**, so the audit log is not a second copy of a secret. Unchanged values produce no entry. |
+| F6 (was S4) | **Blind overwrite of a sealed field.** | A sealed field is **write-once** for everyone without its sealed role: intake may record the reporter, nobody else can replace it (`403 SEALED_FIELD_WRITE`); `ethics_officer` can. |
+| F7 (was S10) | `/health` disclosed OCR and paid-OCR configuration. | `/health` returns only `{"ok":true}`. Details are at `/health/details`, for the platform tenant only. |
+| F8 (was S11) | CSP allowed `style-src 'unsafe-inline'`. | The UI no longer uses inline styles; `style-src 'self'`. |
+| F9 (was S12) | Client-chosen ids were not validated. | Case, artifact and action ids: 1–64 characters, `A–Z a–z 0–9 . _ : -`, starting alphanumeric (`400 INVALID_ID`). |
 
-## B. Security gaps, not fixed (need a decision or are not built)
+## B. Still open, with the decision taken
 
-| # | Gap | Evidence | Why it matters |
+| # | Gap | Evidence | Decision |
 |---|---|---|---|
-| S1 | **No rate limiting and no JSON body-size limit** on any endpoint (only the 25 MB file cap). | Verified by search: none present | Brute force is limited only by Keycloak's lockout; API abuse and memory exhaustion are open. Expect this finding; we plan a gateway/WAF layer on Oracle Cloud. |
-| S2 | **Field edits are not validated and not state-locked.** `setFields` accepts any keys, ignores enum options and types, and has no check on case state, so a CLOSED or ARCHIVED case's `outcome` or `penaltyType` can be rewritten. | Code review (`src/engine/workflow.ts`, `setFields`) | Integrity of decided cases. The fix is a product decision (which fields lock at which state), so it is not changed here. |
-| S3 | **The audit log records which fields changed, not their old and new values.** | Verified: payload is `{"fields":["severity"]}` | A tampered or mistaken edit cannot be reconstructed from the log. |
-| S4 | **Blind overwrite of a sealed field.** A user who cannot read `reporterIdentity` can still `PATCH` it. | Code review | Replaces the reporter's identity without being able to see it. Likely rule: sealed fields writable only by their sealed-field roles. |
-| S5 | **Department and privilege walls are enforced in application code, not by the database.** Postgres row-level security isolates **tenants** only. `listCases` loads every case of the tenant and the app filters. | Verified in `0001_init.sql` and `pg-repo.ts` | An application bug (like F1) is the only barrier between departments. This is why the wall tests matter. |
-| S6 | **The audit hash chain is not anchored outside the database.** The app role cannot update or delete rows, but whoever owns the database could rewrite a whole chain consistently. | By design; no external anchor built | Detects accidental and partial tampering, not a privileged insider. |
-| S7 | **Token revocation takes up to 5 minutes.** No introspection or back-channel logout. | Documented in `docs/KEYCLOAK.md` | A disabled user keeps access until the access token expires. |
-| S8 | **No encryption of sensitive fields in the application; no key management.** Case data is plain `jsonb`. Relies on volume encryption in the Kingdom. | Documented in `docs/DB-SETUP.md` | Open item (encryption). A database dump is readable. |
-| S9 | **Backups, point-in-time recovery and retention/purge are not built.** `retentionYears` is null, so purge is disabled. | Documented | Open item (backups). Cannot be tested yet. |
-| S10 | `/health` and `/auth/config` are unauthenticated. `/health` reports whether OCR and the paid OCR engine are configured. | Verified | Minor information disclosure. |
-| S11 | `style-src 'unsafe-inline'` in the Content-Security-Policy (the UI uses inline `style`). `script-src` is `'self'`. | Verified in headers | Weakens CSP against style injection. |
-| S12 | Case, artifact and action ids are chosen by the client; format and length are not validated. | Code review | The web UI escapes them. Test stored XSS and oversized ids anyway. |
-| S13 | Access token is held in browser memory; a reload re-authenticates through the Keycloak session. | Documented | Check for token exposure in logs, referrers and console. |
-| S14 | Realm roles are set by platform staff in Keycloak. Per-tenant role administration by client admins is not built. | Documented | A tenant admin cannot grant roles, by design for now. |
+| S5 | **Department and privilege walls are enforced in application code, not by the database.** Row-level security isolates **tenants** only; the app filters the rest. | Verified in `0001_init.sql`, `pg-repo.ts` | **Add database-level department and clearance policies** (`app.departments`, `app.clearance` set per transaction, and filter the list in SQL, which also fixes list performance). Deliberately **not** done blind: it must be built and proven against a real PostgreSQL, which the build environment does not have. Until then the single redaction/permission choke point and the wall tests are the control. |
+| S6 | **The audit hash chain is not anchored outside the database.** The app role cannot change rows, but whoever owns the database could rewrite a whole chain consistently. | By design | **Anchor each tenant's chain head daily to write-once storage** (Oracle Object Storage with a retention lock) and verify it in a scheduled job. Built with the operations work (needs the cloud account). |
+| S7 | **Token revocation takes up to 5 minutes.** No introspection or back-channel logout. | `docs/KEYCLOAK.md` | **Accepted for the pilot**; add Keycloak back-channel logout and a short denylist before general release. We have not yet checked how the UI behaves when the 5-minute token expires mid-session: please record it. |
+| S8 | **No application-level encryption; no key management.** Case data is plain `jsonb`. | `docs/DB-SETUP.md` | **Two layers:** (1) encrypted volumes and database storage with customer-managed keys in the cloud key vault; (2) application-level envelope encryption (AES-256-GCM, a data key per tenant wrapped by the vault key) for sealed and personal fields and for stored law/evidence files. Next build item: it changes the storage and redaction paths and needs its own tests. |
+| S9 | **Backups, point-in-time recovery and retention/purge are not built.** `retentionYears` is null, so purge is disabled. | `docs/DB-SETUP.md` | **Continuous WAL archiving plus base backups to in-Kingdom object storage, encrypted, with a restore drill every quarter; purge stays off until counsel sets retention periods.** Operations build. |
+| S13 | Access token is held in browser memory; a reload re-authenticates through the Keycloak session. | `docs/KEYCLOAK.md` | Keep (best practice for a public client); check it does not appear in logs, referrers or console. |
+| S14 | Realm roles are set by platform staff. Per-tenant role administration by client admins is not built. | `docs/KEYCLOAK.md` | Intentional for the pilot; build a tenant-admin role screen before onboarding a second large client. |
 
 ## C. Intentionally incomplete: do not report as defects
 

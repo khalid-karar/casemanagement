@@ -14,7 +14,7 @@ Two environments are used. **Dev mode** (`pnpm start:dev`) uses the user switche
 
 | ID | Step | Expected |
 |---|---|---|
-| A1 | `GET /health` | `ok: true`; `ocr: true` (if `false`, scans and Arabic PDFs fail with 503) |
+| A1 | `GET /health` without sign-in; then `GET /health/details` as `p-editor`, as `a-hr-mgr` and with no token | `/health`: only `{"ok":true}`. `/health/details`: `p-editor` gets `ocr: true` (if `false`, scans and Arabic PDFs fail with 503); `a-hr-mgr` `404`; no token `401` |
 | A2 | Open the app, no account selected (oidc mode) | Redirected to Keycloak; no case data visible |
 | A3 | Any API call with no token, a garbage token, and `Bearer dev:a-hr-mgr` in **oidc** mode | `401` each time |
 | A4 | Start the server with `AUTH_MODE` unset; then with `AUTH_MODE=dev NODE_ENV=production` | Refuses to start both times |
@@ -78,6 +78,17 @@ Use the seeded `HR-2026-002` (already at *Findings issued*, written questioning)
 ### C3. SLA and calendar
 SLA targets and the Saudi calendar (Friday and Saturday weekend, tenant-supplied holidays, Asia/Riyadh) exist in the engine and have unit tests, but are **not yet exposed in the API or UI**. Not testable manually yet. Note any expectation you have about holidays and Hijri dates for the product backlog.
 
+### C4. Field rules
+
+| ID | Step | Expected |
+|---|---|---|
+| C4.1 | Send unknown field names, wrong types (text for a number, `true` as a string for a boolean), an enum value not in the list, `2026-02-31`, `10/11/2026`, 20,001 characters in a long text, a negative amount | `400` listing each offending field; nothing saved |
+| C4.2 | Send the literal text `[REDACTED]` as a value | `400 REDACTED_MARKER` |
+| C4.3 | Case, artifact and action ids with spaces, `../`, `<script>`, 65 characters, non-ASCII | `400 INVALID_ID` |
+| C4.4 | `a-hr-mgr` records `reporterIdentity` on a case that has none; then changes it | First: allowed. Second: `403 SEALED_FIELD_WRITE`. `a-ethics`: allowed |
+| C4.5 | Send the same value a field already holds | Succeeds with no change and **no** audit entry |
+| C4.6 | In the UI, edit each field type (enum, date, number, money, boolean, long text) | The input matches the type and the value saves; no way to type a free-text field name |
+
 ## D. Legal library and Arabic quality (open item: test with real laws)
 
 Place only **public** national law in the platform tenant. Use the `p-editor` and `p-verifier` accounts.
@@ -135,7 +146,7 @@ The assistant must always produce a draft that needs human review, cite its sour
 | G2 | (QA database, as the application role) `UPDATE` or `DELETE` an `audit_events` row | Rejected by the database. Same for `legal_log` and `ai_log` |
 | G3 | (As the database owner, QA only) change one audit row, then reload the case audit | Chain reported **broken** at that row |
 | G4 | Connect to PostgreSQL as `cms_app` with no tenant set and `SELECT * FROM cases` | Zero rows (fails closed). Setting `app.tenant_id` to another tenant returns only that tenant's rows |
-| G5 | Edit a field of a closed case | **Expected today: it succeeds** (KNOWN-GAPS S2). Record it and confirm the audit entry shows only the field name (S3) |
+| G5 | Edit a field of a CLOSED or ARCHIVED case; edit `outcome`/`penaltyType` of an HR case in DECIDED | `409 FIELD_LOCKED` in both. Then edit an ordinary field of an open case: the audit entry shows old and new value. For a personal or sealed field it shows SHA-256 values only, never the value |
 | G6 | Restart the server on PostgreSQL | All data and chains persist |
 
 ## H. Non-functional (baseline only)
@@ -146,6 +157,8 @@ The assistant must always produce a draft that needs human review, cite its sour
 | H2 | Law library with a large corpus (hundreds of articles) | Loaded per request: record response times |
 | H3 | Concurrent users (start at 20, then 100) on common routes | Record error rate and latency |
 | H4 | Large file uploads (up to 25 MB) and many pages | `TOO_MANY_PAGES` guard works; server stays responsive |
+| H6 | A JSON body over 1 MB; an upload over 26 MB | `413 PAYLOAD_TOO_LARGE` before processing |
+| H7 | 301 requests in a minute from one account; 21 AI or upload requests in a minute | `429` with `Retry-After`; a different account is unaffected. Rotating `X-Forwarded-For` or other headers does not reset the limit. (Per instance, in memory.) |
 | H5 | Backup and restore, point-in-time recovery, encryption at rest, retention purge | **Not built.** Mark BLOCKED; these are open items |
 
 ## Defect template

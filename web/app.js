@@ -77,15 +77,16 @@ async function viewCase() {
   if (!r.ok) { openId = null; return viewCases(); }
   const { case: c, actions } = r.j;
   const au = await api('GET', `/cases/${encodeURIComponent(openId)}/audit`);
+  const def = ((await api('GET', '/case-types')).j || []).find((x) => x.key === c.caseTypeKey);
   $('#view').innerHTML = `
   <p><a class="lnk" id="bk">← ${t('back')}</a></p>
   <div class="card"><h3>${esc(c.id)} <span class="tag">${esc(c.state)}</span></h3><div class="mute">${esc(c.caseTypeKey)} · ${esc(c.confidentiality)}</div></div>
   <div class="card"><h3>${t('actions')}</h3>
    ${actions.map((a) => `<div class="row"><button data-act="${a.action}" ${a.allowed ? '' : 'disabled'}>${esc(lab(a.label))}</button>
      ${a.allowed ? '' : `<ul class="blk bad">${a.blockers.map((b) => `<li>${esc(b.message)}</li>`).join('')}</ul>`}</div>`).join('') || '—'}
-   <div class="row" style="margin-top:8px"><input id="role" placeholder="${t('role')} (hr_director)"><button class="alt" id="apv">${t('approve')}</button></div></div>
+   <div class="row mt8"><input id="role" placeholder="${t('role')} (hr_director)"><button class="alt" id="apv">${t('approve')}</button></div></div>
   <div class="card"><h3>${t('fields')}</h3><table>${Object.entries(c.fields).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</table>
-   <div class="row"><input id="fk" placeholder="key"><input id="fv" class="grow" placeholder="value"><button class="alt" id="fs">${t('save')}</button></div></div>
+   <div class="row"><select id="fk">${(def?.fields ?? []).map((f) => `<option value="${esc(f.key)}">${esc(lab(f.label))}</option>`).join('')}</select><span id="fvw" class="grow"></span><button class="alt" id="fs">${t('save')}</button></div></div>
   <div class="card"><h3>${t('artifacts')}</h3><ul>${c.artifacts.map((a) => `<li>${esc(a.type)} <span class="mute">${esc(a.createdAt)}</span></li>`).join('')}</ul>
    <div class="row"><input id="at" class="grow" placeholder="${t('artType')}"><button class="alt" id="as">${t('addArtifact')}</button></div></div>
   <div class="card"><h3>${t('audit')}</h3><p class="${au.j.integrity?.valid ? 'ok' : 'bad'}">${au.j.integrity?.valid ? t('chainOk') : t('chainBad')}</p>
@@ -93,7 +94,22 @@ async function viewCase() {
   $('#bk').onclick = () => { openId = null; render(); };
   document.querySelectorAll('[data-act]').forEach((b) => (b.onclick = async () => { flash(await api('POST', `/cases/${encodeURIComponent(openId)}/transitions/${b.dataset.act}`)); render(); }));
   $('#apv').onclick = async () => { flash(await api('POST', `/cases/${encodeURIComponent(openId)}/approvals`, { role: $('#role').value })); render(); };
-  $('#fs').onclick = async () => { flash(await api('PATCH', `/cases/${encodeURIComponent(openId)}/fields`, { [$('#fk').value]: $('#fv').value })); render(); };
+  // Typed editor: the input matches the field's type, and the value is sent as that type (the server rejects anything else).
+  const drawInput = () => {
+    const f = (def?.fields ?? []).find((x) => x.key === $('#fk').value); if (!f) return;
+    const w = $('#fvw');
+    if (f.type === 'enum') w.innerHTML = `<select id="fv">${f.options.map((o) => `<option>${esc(o)}</option>`).join('')}</select>`;
+    else if (f.type === 'boolean') w.innerHTML = `<select id="fv"><option value="true">${lang === 'ar' ? 'نعم' : 'Yes'}</option><option value="false">${lang === 'ar' ? 'لا' : 'No'}</option></select>`;
+    else if (f.type === 'longtext') w.innerHTML = `<textarea id="fv" rows="3" class="w100"></textarea>`;
+    else w.innerHTML = `<input id="fv" class="w100" type="${f.type === 'date' ? 'date' : f.type === 'number' || f.type === 'money' ? 'number' : 'text'}" ${f.type === 'money' ? 'min="0"' : ''} step="any">`;
+  };
+  if ($('#fk')) { $('#fk').onchange = drawInput; drawInput(); }
+  $('#fs').onclick = async () => {
+    const f = (def?.fields ?? []).find((x) => x.key === $('#fk').value); if (!f) return;
+    const raw = $('#fv').value;
+    const value = f.type === 'number' || f.type === 'money' ? Number(raw) : f.type === 'boolean' ? raw === 'true' : raw;
+    flash(await api('PATCH', `/cases/${encodeURIComponent(openId)}/fields`, { [f.key]: value })); render();
+  };
   $('#as').onclick = async () => { flash(await api('POST', `/cases/${encodeURIComponent(openId)}/artifacts`, { id: 'a' + Date.now(), type: $('#at').value })); render(); };
 }
 
@@ -114,12 +130,12 @@ async function viewReview() {
   <button class="alt" id="sync">${t('syncB')}</button></div>
     <div class="card"><h3>${t('upload')}</h3>
    <div class="row"><input id="li" placeholder="${t('instId')}"><input id="lt" class="grow" placeholder="${t('titleAr')}"><button class="alt" id="lia">${t('create')}</button></div>
-   <div class="row" style="margin-top:8px"><input id="vi" placeholder="${t('verId')}"><input id="vl" placeholder="${t('label')}"><input id="ve" type="date" title="${t('eff')}"><input id="vin" placeholder="${t('instId')}"></div>
-   <div class="row" style="margin-top:8px"><input type="file" id="vf" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg"><span class="mute">PDF · Word · TXT · PNG/JPG (OCR)</span></div>
-   <textarea id="vt" rows="6" style="width:100%;margin-top:8px" placeholder="${t('text')}"></textarea>
+   <div class="row mt8"><input id="vi" placeholder="${t('verId')}"><input id="vl" placeholder="${t('label')}"><input id="ve" type="date" title="${t('eff')}"><input id="vin" placeholder="${t('instId')}"></div>
+   <div class="row mt8"><input type="file" id="vf" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg"><span class="mute">PDF · Word · TXT · PNG/JPG (OCR)</span></div>
+   <textarea id="vt" rows="6" class="w100 mt8" placeholder="${t('text')}"></textarea>
    <div class="row"><button id="vu">${t('upload')}</button></div></div>
   ${list.map((v) => `<div class="card"><h3>${esc(v.id)} · ${esc(v.versionLabel)} <span class="tag">${esc(v.status)}</span> <span class="mute">${esc(v.effectiveFrom)}</span></h3>
-   <div class="row" style="align-items:flex-start"><div class="grow"><b>${t('source')}</b>${v.provisions.map((p) => `<p><b>${t('article')} ${esc(p.number)}</b><br>${esc(p.textAr)}</p>`).join('')}</div>
+   <div class="row top"><div class="grow"><b>${t('source')}</b>${v.provisions.map((p) => `<p><b>${t('article')} ${esc(p.number)}</b><br>${esc(p.textAr)}</p>`).join('')}</div>
    <div class="grow"><b>${t('findings')}</b>${v.proposals.map((p) => `<div class="card"><span class="tag">${esc(p.kind)}</span> ${t('article')} ${esc(p.provisionNumber)} <span class="tag">${esc(p.status)}</span><br>${esc(p.summary)}<div class="mute">«${esc(p.quote)}»</div>
      <button class="alt" data-pd="${esc(p.id)}" data-d="accept">${t('accept')}</button> <button class="alt" data-pd="${esc(p.id)}" data-d="reject">${t('rejectP')}</button></div>`).join('') || `<p class="mute">${t('none')}</p>`}</div></div>
    <div class="row"><button data-vv="${esc(v.id)}">${t('verify')}</button><button class="alt" data-vr="${esc(v.id)}">${t('reject')}</button></div></div>`).join('') || `<p class="mute">${t('nothing')}</p>`}`;
@@ -150,7 +166,7 @@ async function viewAi() {
   const isAdmin = (me?.roles ?? []).includes('tenant_admin');
   $('#view').innerHTML = `<div class="card"><h3>${t('tabAi')}</h3><div class="warn">${t('draft')}</div>
   <p class="mute">${t('engine')}: <b>${label(S.current)}</b></p>
-  <textarea id="q" rows="3" style="width:100%" placeholder="${t('question')}"></textarea>
+  <textarea id="q" rows="3" class="w100" placeholder="${t('question')}"></textarea>
   <div class="row"><button id="al">${t('askLaw')}</button><button class="alt" id="ac">${t('askCase')}</button></div><div id="ans"></div></div>
   <div id="consent"></div>`;
   const show = (r) => { const a = r.j; $('#ans').innerHTML = `<pre>${esc(a.text ?? a.message)}</pre><div class="mute">${t('citations')}: ${(a.citations || []).map((c) => esc(c.article ? `${c.instrument} ${t('article')} ${c.article} (${c.versionLabel})` : c)).join(' · ') || t('none')}${a.engine ? ' · ' + t('engine') + ': ' + esc(a.engine.label) : ''}</div>`; };
@@ -170,7 +186,7 @@ async function viewAi() {
     const body = (lang === 'ar' ? tx.ar : tx.en).map((l) => `<li>${esc(l)}</li>`).join('');
     $('#consent').innerHTML = `<div class="card"><h3>${t('consentT')}</h3><div class="warn">${t('offNote')}</div><ul>${body}</ul>
       <label><input type="checkbox" id="ip" ${ip ? 'checked' : ''}> ${t('inclP')}</label>
-      <div class="row" style="margin-top:8px"><input id="sn" placeholder="${t('signName')}"><input id="st" placeholder="${t('signTitle')}"></div>
+      <div class="row mt8"><input id="sn" placeholder="${t('signName')}"><input id="st" placeholder="${t('signTitle')}"></div>
       <label><input type="checkbox" id="ak"> ${t('ack')}</label><div><button id="sg">${t('signB')}</button></div></div>`;
     $('#ip').onchange = draw;
     $('#sg').onclick = async () => { flash(await api('POST', '/ai/consent', { includePersonal: $('#ip').checked, name: $('#sn').value, title: $('#st').value, textSha256: tx.sha256, acknowledge: $('#ak').checked })); render(); };

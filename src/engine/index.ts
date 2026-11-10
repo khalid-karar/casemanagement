@@ -5,6 +5,7 @@ export * from './evidence';
 export * from './permissions';
 export * from './definition';
 export * from './workflow';
+export * from './fields';
 export * from './sla';
 export * from './legalhold';
 export * from './referral';

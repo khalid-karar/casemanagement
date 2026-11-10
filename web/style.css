@@ -25,3 +25,5 @@ ul.blk{margin:4px 0 0;padding-inline-start:20px}
 pre{white-space:pre-wrap;background:#f3f1ea;padding:8px;border-radius:6px}
 a.lnk{color:var(--navy);cursor:pointer;text-decoration:underline}
 @media (max-width:600px){main{padding:12px}}
+
+.mt8{margin-top:8px}.w100{width:100%}.row.top{align-items:flex-start}

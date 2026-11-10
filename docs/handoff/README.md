@@ -24,7 +24,7 @@ pnpm install
 pnpm start:dev              # in-memory data; user switcher at http://localhost:3000
 pnpm seed                   # in a second terminal: test cases and a verified law
 ```
-Add `DATABASE_URL` (role `cms_app`, see `DB-SETUP.md`) to keep data across restarts and to test row-level security. Scans and Arabic PDFs need `poppler-utils`, `tesseract-ocr` and `tesseract-ocr-ara` (the `Dockerfile` has them); `/health` shows `"ocr": true` when they are present. `pnpm start:dev` is refused when `NODE_ENV=production`.
+Add `DATABASE_URL` (role `cms_app`, see `DB-SETUP.md`) to keep data across restarts and to test row-level security. Scans and Arabic PDFs need `poppler-utils`, `tesseract-ocr` and `tesseract-ocr-ara` (the `Dockerfile` has them); `/health/details` (as `p-editor`) shows `"ocr": true` when they are present. `pnpm start:dev` is refused when `NODE_ENV=production`.
 
 **QA realm (real sign-in)**
 ```bash

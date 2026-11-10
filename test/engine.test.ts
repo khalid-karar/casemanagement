@@ -38,7 +38,7 @@ describe('HR misconduct: Labour Law Art. 71 enforced by the state machine', () =
   it('blocks a full penalty without the Art. 71 sequence, reporting every blocker', () => {
     let c = throughInvestigation('WRITTEN');
     c = { ...c, artifacts: c.artifacts.filter((a) => a.type !== 'defense_investigation') };
-    c = setFields(c, { outcome: 'SUBSTANTIATED_PENALTY', penaltyType: 'FINE' }, manager, now).case;
+    c = setFields(c, { outcome: 'SUBSTANTIATED_PENALTY', penaltyType: 'FINE' }, manager, now, hr).case;
     const ev = evaluateTransition(hr, c, 'decide_penalty', manager);
     expect(ev.allowed).toBe(false);
     expect(ev.blockers.length).toBeGreaterThanOrEqual(2); // sequence + approval
@@ -46,18 +46,18 @@ describe('HR misconduct: Labour Law Art. 71 enforced by the state machine', () =
 
   it('rejects oral questioning for a dismissal but allows a warning via the minor path', () => {
     let c = throughInvestigation('ORAL');
-    c = setFields(c, { outcome: 'SUBSTANTIATED_PENALTY', penaltyType: 'DISMISSAL', decisionRationale: 'r' }, manager, now).case;
+    c = setFields(c, { outcome: 'SUBSTANTIATED_PENALTY', penaltyType: 'DISMISSAL', decisionRationale: 'r' }, manager, now, hr).case;
     c = recordApproval(c, 'hr_director', director, now).case;
     expect(evaluateTransition(hr, c, 'decide_penalty', manager).allowed).toBe(false);
     expect(evaluateTransition(hr, c, 'decide_minor_penalty', manager).allowed).toBe(false);
 
-    c = setFields(c, { penaltyType: 'WARNING' }, manager, now).case;
+    c = setFields(c, { penaltyType: 'WARNING' }, manager, now, hr).case;
     expect(evaluateTransition(hr, c, 'decide_minor_penalty', manager).allowed).toBe(true);
   });
 
   it('allows a written-questioning dismissal once the director approves', () => {
     let c = throughInvestigation('WRITTEN');
-    c = setFields(c, { outcome: 'SUBSTANTIATED_PENALTY', penaltyType: 'DISMISSAL', decisionRationale: 'r' }, manager, now).case;
+    c = setFields(c, { outcome: 'SUBSTANTIATED_PENALTY', penaltyType: 'DISMISSAL', decisionRationale: 'r' }, manager, now, hr).case;
     c = recordApproval(c, 'hr_director', director, now).case;
     c = applyTransition(hr, c, 'decide_penalty', manager, now).case;
     expect(c.state).toBe('DECIDED');
@@ -78,7 +78,7 @@ describe('HR misconduct: Labour Law Art. 71 enforced by the state machine', () =
 
   it('requires a plan to close, and a hold blocks archive', () => {
     let c = throughInvestigation('WRITTEN');
-    c = setFields(c, { outcome: 'UNSUBSTANTIATED', decisionRationale: 'r' }, manager, now).case;
+    c = setFields(c, { outcome: 'UNSUBSTANTIATED', decisionRationale: 'r' }, manager, now, hr).case;
     c = recordApproval(c, 'hr_director', director, now).case;
     c = applyTransition(hr, c, 'decide_no_penalty', manager, now).case;
     c = addArtifact(c, { id: 'cm', type: 'closure_memo' }, manager, now).case;
