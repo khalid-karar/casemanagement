@@ -11,12 +11,16 @@ import { RateLimiter, isHeavyRoute } from './ratelimit';
 import { CASE_TYPES } from '../case-types';
 import { FileError, LegalError, extractProposals, extractText } from '../legal';
 import { MAX_BYTES } from '../legal/files';
+import { ARTIFACT_TYPE, describeUpload, safeName } from './documents';
 import type { LegalLibrary } from '../legal';
 import { ocrAvailable } from '../legal/ocr';
 import type { VisionOcr } from '../legal';
 import { legalStatus, syncBindings } from '../case-types/legal-sources';
 import { CONSENT_VERSION, answerFromLaws, answerQuestion, consentHash, consentText, selectProvider } from '../ai';
 import type { AiProviders, ChatProvider, InKingdomProvider } from '../ai';
+import { NajizError } from '../najiz/types';
+import type { NajizRegistry } from '../najiz/types';
+import { NajizRuleError, approverOf, assertMaySubmit, importUpdates, najizState, pendingArtifact, planPacket, reconcile, resolution } from '../najiz/workflow';
 
 export interface AppDeps {
   repo: Repo; paidOcr?: VisionOcr;
@@ -33,6 +37,8 @@ export interface AppDeps {
   /** External in-Kingdom provider, usable only for tenants with a valid signed consent. */
   inKingdom?: InKingdomProvider;
   clock?: () => string;
+  /** Which Najiz gateway serves which client. Absent = Najiz is off for everyone. The simulator is refused in production. */
+  najiz?: NajizRegistry;
   /** Per-user request limits per minute (see ratelimit.ts). Defaults: 300 general, 20 for AI/upload routes. */
   limits?: { perMinute?: number; heavyPerMinute?: number };
   /** Largest JSON body in bytes (default 1 MB). File uploads have their own cap. */
@@ -63,6 +69,7 @@ export function createApp(deps: AppDeps) {
   const providers: AiProviders = { ...(deps.provider ? { sovereign: deps.provider } : {}), ...(deps.inKingdom ? { inKingdom: deps.inKingdom } : {}) };
   const now = deps.clock ?? (() => new Date().toISOString());
   const app = new Hono<Env>();
+  const isUpload = (m: string, p: string) => m === 'POST' && (p === '/laws/files' || /^\/cases\/[^/]+\/documents$/.test(p));
   const limiter = new RateLimiter();
   const generalMax = deps.limits?.perMinute ?? 300;
   const heavyMax = deps.limits?.heavyPerMinute ?? 20;
@@ -71,7 +78,7 @@ export function createApp(deps: AppDeps) {
   const tooLarge = (c: any) => c.json({ error: 'PAYLOAD_TOO_LARGE', message: T.tooLarge[c.get('lang') as 'ar' | 'en'] }, 413);
   const jsonCap = bodyLimit({ maxSize: deps.maxJsonBytes ?? 1024 * 1024, onError: tooLarge });
   const fileCap = bodyLimit({ maxSize: MAX_BYTES + 1024 * 1024, onError: tooLarge });
-  app.use('*', async (c, next) => { c.set('lang', pickLang(c.req.query('lang'), c.req.header('accept-language'))); return (c.req.path === '/laws/files' ? fileCap : jsonCap)(c, next); });
+  app.use('*', async (c, next) => { c.set('lang', pickLang(c.req.query('lang'), c.req.header('accept-language'))); return (isUpload(c.req.method, c.req.path) ? fileCap : jsonCap)(c, next); });
 
   app.use('*', async (c, next) => {
     c.set('lang', pickLang(c.req.query('lang'), c.req.header('accept-language')));
@@ -99,6 +106,7 @@ export function createApp(deps: AppDeps) {
     if (err instanceof TransitionBlockedError) {
       return c.json({ error: 'BLOCKED', message: T.blocked[lang], blockers: err.blockers.map((b) => ({ code: b.code, message: lang === 'ar' ? b.messageAr ?? b.message : b.message })) }, 409);
     }
+    if (err instanceof NajizRuleError) return c.json({ error: 'NAJIZ_BLOCKED', code: err.code, message: T.blocked[lang] }, 409);
     if (err instanceof AccessDeniedError) return c.json({ error: 'FORBIDDEN', reason: err.reason, message: T.forbidden[lang] }, 403);
     if (err instanceof FieldError) return c.json({ error: err.kind === 'LOCKED' ? 'FIELD_LOCKED' : 'INVALID_FIELDS', problems: err.problems, message: err.kind === 'LOCKED' ? T.locked[lang] : T.badRequest[lang] }, err.kind === 'LOCKED' ? 409 : 400);
     if (err instanceof ConflictOfInterestError) return c.json({ error: 'CONFLICT_OF_INTEREST', codes: err.codes, message: T.conflict[lang] }, 409);
@@ -136,6 +144,7 @@ export function createApp(deps: AppDeps) {
   app.get('/case-types', async (c) => {
     const lib = await repo.lib(c.get('user').tenantId, 'read', (l) => l);
     return c.json(Object.values(CASE_TYPES).map((d) => ({ key: d.key, domain: d.domain, label: d.label, legalReview: d.legalReview.status, legal: legalStatus(lib, d.key),
+      states: d.states.map((x) => ({ key: x.key, label: x.label })),
       fields: d.fields.map((f) => ({ key: f.key, label: f.label, type: f.type, options: f.options ?? null, sensitivity: f.sensitivity, lockedIn: f.lockedIn ?? [] })) })));
   });
 
@@ -211,6 +220,152 @@ export function createApp(deps: AppDeps) {
       return cs ? tx.getAudit(cs.id) : undefined;
     });
     return r ? c.json({ events: r, integrity: repo.verifyChain(r) }) : nf(c);
+  });
+
+  // ---- Case documents ------------------------------------------------------------------
+  // The bytes behind an artifact. Upload stores them under their SHA-256 and adds the artifact carrying that hash in one
+  // step, so "evidence" and "filing" always point at exactly what was stored. Same access rule as editing the case.
+  app.post('/cases/:id/documents', async (c) => {
+    const user = c.get('user');
+    const form = await c.req.parseBody();
+    const f = form['file'];
+    const type = String(form['type'] ?? '');
+    if (!(f instanceof File) || !ARTIFACT_TYPE.test(type)) throw new FileError('NO_FILE');
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const d = describeUpload(bytes);
+    const name = safeName(f.name);
+    const caseId = c.req.param('id');
+    const found = await repo.tx(user.tenantId, (tx) => load(tx, caseId, user, 'write'));
+    if (!found) return nf(c);
+    await repo.putCaseDocument(user.tenantId, caseId, { sha256: d.sha256, name, mime: d.mime, bytes, uploadedBy: user.id, uploadedAt: now() });
+    const out = await repo.tx(user.tenantId, async (tx) => {
+      const cs = await load(tx, caseId, user, 'write', true);
+      if (!cs) return undefined;
+      const m = addArtifact(cs, { id: `${type}-${d.sha256.slice(0, 16)}`, type, hash: d.sha256, payload: { name, mime: d.mime, size: d.size } }, user, now());
+      await tx.saveCase(m.case, m.event);
+      return m.case;
+    });
+    return out ? c.json({ sha256: d.sha256, artifactId: `${type}-${d.sha256.slice(0, 16)}`, case: view(out, user) }, 201) : nf(c);
+  });
+  app.get('/cases/:id/documents/:sha256', async (c) => {
+    const user = c.get('user');
+    const sha = c.req.param('sha256');
+    if (!/^[0-9a-f]{64}$/.test(sha)) return nf(c);
+    // 'write' access, not 'read': audit-assurance read-across covers the redacted case view, never the document bytes
+    // (an exhibit can contain exactly what redaction hides, such as a reporter's name).
+    const cs = await repo.tx(user.tenantId, (tx) => load(tx, c.req.param('id'), user, 'write'));
+    if (!cs || !cs.artifacts.some((a) => a.hash === sha)) return nf(c); // only documents the case actually references
+    const doc = await repo.getCaseDocument(user.tenantId, cs.id, sha);
+    if (!doc) return nf(c);
+    return new Response(new Blob([Buffer.from(doc.bytes)]), { headers: { 'content-type': doc.mime, 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(doc.name)}`, 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'; sandbox", 'cache-control': 'no-store' } });
+  });
+
+  // ---- Najiz (court filing) --------------------------------------------------------------
+  // See src/najiz/workflow.ts for the rules. The simulator is a stand-in until a client has Najiz access; it is refused
+  // in production so a fake filing can never be mistaken for a real one.
+  const najizFor = (tenantId: string) => {
+    const gw = deps.najiz?.gatewayFor(tenantId);
+    const claimant = deps.najiz?.claimantFor(tenantId);
+    if (!gw || !claimant || (gw.simulated && process.env['NODE_ENV'] === 'production')) return undefined;
+    return { gw, claimant };
+  };
+  const najizOff = (c: any) => c.json({ error: 'NAJIZ_NOT_ENABLED', message: T.notFound[c.get('lang') as 'ar' | 'en'] }, 404);
+  const najizNotReady = (c: any) => c.json({ error: 'NAJIZ_CONTRACT_NOT_CONFIGURED' }, 503);
+
+  app.get('/cases/:id/najiz', async (c) => {
+    const user = c.get('user');
+    const cs = await repo.tx(user.tenantId, (tx) => load(tx, c.req.param('id'), user, 'write'));
+    if (!cs || cs.caseTypeKey !== 'legal.matter') return nf(c);
+    const nz = najizFor(user.tenantId);
+    if (!nz) return c.json({ enabled: false });
+    const st = najizState(cs);
+    let preview: unknown = null;
+    let blockedBy: string | null = null;
+    try { preview = planPacket(cs, nz.claimant, st.attempts).packet; } catch (e) { if (e instanceof NajizRuleError) blockedBy = e.code; else throw e; }
+    if (!blockedBy) { try { assertMaySubmit(CASE_TYPES[cs.caseTypeKey]!, cs, user); } catch (e) { blockedBy = e instanceof NajizRuleError ? e.code : e instanceof AccessDeniedError ? e.reason : 'BLOCKED'; } }
+    return c.json({ enabled: true, simulated: nz.gw.simulated, configured: nz.gw.configured, gateway: nz.gw.name, ...st, canSubmit: !blockedBy && nz.gw.configured, blockedBy, preview });
+  });
+
+  app.post('/cases/:id/najiz/submit', async (c) => {
+    const user = c.get('user');
+    const nz = najizFor(user.tenantId);
+    if (!nz) return najizOff(c);
+    if (!nz.gw.configured) return najizNotReady(c);
+    const caseId = c.req.param('id');
+    // Step 1 (locked): check every rule, build the packet from the allowlist, and COMMIT the attempt before anything is sent.
+    const prep = await repo.tx(user.tenantId, async (tx) => {
+      const cs = await load(tx, caseId, user, 'write', true);
+      if (!cs) return undefined;
+      const def = CASE_TYPES[cs.caseTypeKey]!;
+      const st = assertMaySubmit(def, cs, user);
+      const plan = planPacket(cs, nz.claimant, st.attempts);
+      const m = addArtifact(cs, pendingArtifact(plan, user, now(), approverOf(cs, user), nz.gw.simulated), user, now());
+      await tx.saveCase(m.case, m.event);
+      return { plan, key: plan.packet.idempotencyKey };
+    });
+    if (!prep) return nf(c);
+    const attachments = [];
+    for (const a of prep.plan.packet.attachments) {
+      const doc = await repo.getCaseDocument(user.tenantId, caseId, a.sha256);
+      if (!doc) { attachments.length = 0; break; }
+      attachments.push({ ...a, bytes: doc.bytes });
+    }
+    // Step 2 (no transaction held): the call. Step 3 (locked): record what happened.
+    let outcome: Parameters<typeof resolution>[1];
+    if (attachments.length !== prep.plan.packet.attachments.length) outcome = { err: new NajizError('UNAVAILABLE', 'DOCUMENT_BYTES_MISSING') }; // nothing was sent
+    else {
+      try { outcome = { ok: await nz.gw.submitFiling({ ...prep.plan.packet, attachments }) }; }
+      catch (e) { outcome = { err: e instanceof NajizError ? e : new NajizError('AMBIGUOUS') }; }
+    }
+    const art = resolution(prep.key, outcome, nz.gw.simulated);
+    const out = await repo.tx(user.tenantId, async (tx) => {
+      const cs = await load(tx, caseId, user, 'write', true);
+      if (!cs) return undefined;
+      const m = addArtifact(cs, art, user, now());
+      await tx.saveCase(m.case, m.event);
+      return m.case;
+    });
+    if (!out) return nf(c);
+    if ('ok' in outcome) return c.json({ status: 'SUBMITTED', najizRef: outcome.ok.najizRef, najiz: outcome.ok.status, simulated: nz.gw.simulated, case: view(out, user) }, 201);
+    const code = outcome.err.code;
+    const http = code === 'REJECTED' ? 422 : code === 'AMBIGUOUS' ? 502 : 503;
+    return c.json({ error: 'NAJIZ_' + code, outcome: code === 'AMBIGUOUS' ? 'UNCONFIRMED_RECONCILE_REQUIRED' : code === 'REJECTED' ? 'REJECTED_CORRECT_AND_RESUBMIT' : 'NOT_SENT_SAFE_TO_RETRY', ...(code === 'REJECTED' && outcome.err.detail ? { reason: outcome.err.detail.slice(0, 500) } : {}), case: view(out, user) }, http);
+  });
+
+  app.post('/cases/:id/najiz/reconcile', mutate((cs, u, b) => reconcile(cs, u, b ?? {}, now()), 'transition'));
+
+  app.post('/cases/:id/najiz/sync', async (c) => {
+    const user = c.get('user');
+    const nz = najizFor(user.tenantId);
+    if (!nz) return najizOff(c);
+    if (!nz.gw.configured) return najizNotReady(c);
+    const caseId = c.req.param('id');
+    const cs0 = await repo.tx(user.tenantId, (tx) => load(tx, caseId, user, 'write'));
+    if (!cs0 || cs0.caseTypeKey !== 'legal.matter') return nf(c);
+    if (!user.roles.includes('legal_counsel')) throw new AccessDeniedError('ROLE_REQUIRED:legal_counsel');
+    const st = najizState(cs0);
+    if (st.state !== 'SUBMITTED') throw new NajizRuleError('NOT_SUBMITTED');
+    let updates;
+    try { updates = await nz.gw.fetchUpdates(st.najizRef); }
+    catch (e) { const code = e instanceof NajizError ? e.code : 'UNAVAILABLE'; return c.json({ error: 'NAJIZ_' + code }, code === 'REJECTED' ? 422 : 503); }
+    const imp = importUpdates(cs0, updates, nz.gw.simulated);
+    for (const d of imp.documents) await repo.putCaseDocument(user.tenantId, caseId, { ...d, uploadedBy: 'najiz', uploadedAt: now() });
+    const out = await repo.tx(user.tenantId, async (tx) => {
+      let cs = await load(tx, caseId, user, 'write', true);
+      if (!cs) return undefined;
+      for (const a of imp.artifacts) {
+        if (cs.artifacts.some((x) => x.id === a.id)) continue; // a concurrent sync already imported it
+        const m = addArtifact(cs, a, user, now());
+        await tx.saveCase(m.case, m.event); cs = m.case;
+      }
+      // Fill the court case number only if it is empty: never overwrite what counsel recorded.
+      if (imp.courtCaseNumber && !cs.fields['courtCaseNumber']) {
+        try { const m = setFields(cs, { courtCaseNumber: imp.courtCaseNumber }, user, now(), CASE_TYPES[cs.caseTypeKey]!); await tx.saveCase(m.case, m.event); cs = m.case; } catch { /* locked or invalid: leave it */ }
+      }
+      return cs;
+    });
+    // Deliberately no transition: counsel records the hearing / judgment step, under the normal guards.
+    return out ? c.json({ status: updates.status, imported: imp.artifacts.filter((a) => a.type !== 'najiz_status').length, case: view(out, user) }) : nf(c);
   });
 
   // ---- Legal library -----------------------------------------------------------

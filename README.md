@@ -14,7 +14,7 @@ Multi-tenant, Arabic-first case management for Saudi corporates: HR, Security, A
 
 `pnpm install && pnpm typecheck && pnpm test`
 
-Not yet built: Nafath sign-in, Najiz integration, job queue, eval tasks (`pnpm eval:ai` has no tasks yet), encryption of sensitive fields, backups and retention. See `docs/handoff/KNOWN-GAPS.md`.
+Najiz filing is built and tested against a simulator (`docs/NAJIZ.md`); the real Najiz wire mapping waits for a client's portal access. Not yet built: Nafath sign-in, job queue, eval tasks (`pnpm eval:ai` has no tasks yet), encryption of sensitive fields, backups and retention. See `docs/handoff/KNOWN-GAPS.md`.
 
 ## Test data
 `pnpm seed` loads QA cases and a verified law into a running server. The 22 test accounts live in `src/api/test-users.ts` and drive both the dev user switcher and the QA Keycloak realm (`pnpm gen:realm:qa`). Test data only.

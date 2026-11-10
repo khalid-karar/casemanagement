@@ -141,4 +141,20 @@ describe.skipIf(!PG_ENABLED)('Postgres', () => {
     await call(a, 'mgr', 'POST', '/cases', { id: 'c1', caseType: 'hr.misconduct', fields: {} });
     expect((await call(a, 'mgr', 'POST', '/cases', { id: 'c1', caseType: 'hr.misconduct', fields: {} })).status).toBe(409);
   });
+
+  // NOT RUN in the build environment (no PostgreSQL server there): run with TEST_ADMIN_URL / TEST_APP_URL set.
+  it('stores case documents per tenant, append-only, behind row-level security', async () => {
+    const repo = await newRepo();
+    const doc = { sha256: 'a'.repeat(64), name: 'f.pdf', mime: 'application/pdf', bytes: new Uint8Array([1, 2, 3]), uploadedBy: 'mgr', uploadedAt: clock() };
+    await repo.putCaseDocument(T1, 'c1', doc);
+    await repo.putCaseDocument(T1, 'c1', doc); // idempotent
+    expect(Array.from((await repo.getCaseDocument(T1, 'c1', doc.sha256))!.bytes)).toEqual([1, 2, 3]);
+    expect(await repo.getCaseDocument(T2, 'c1', doc.sha256)).toBeUndefined(); // other tenant: nothing
+    expect((await sqlAs(T2, 'SELECT * FROM case_documents')).rowCount).toBe(0);
+    expect((await sqlAs(null, 'SELECT * FROM case_documents')).rowCount).toBe(0); // no tenant set: fails closed
+    expect((await sqlAs(T1, 'SELECT * FROM case_documents')).rowCount).toBe(1);
+    await expect(sqlAs(T1, "UPDATE case_documents SET name = 'x'")).rejects.toThrow(/permission denied|append-only/);
+    await expect(sqlAs(T1, 'DELETE FROM case_documents')).rejects.toThrow(/permission denied|append-only/);
+    await expect(sqlAs(T2, "INSERT INTO case_documents VALUES ('tenant-a','c1','" + 'b'.repeat(64) + "','n','m',1,'\\x00','u','t')")).rejects.toThrow(/row-level security/);
+  });
 });

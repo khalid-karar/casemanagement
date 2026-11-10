@@ -30,4 +30,4 @@ export class RateLimiter {
 
 /** Routes that cost real CPU, memory or money: stricter limit. */
 export const isHeavyRoute = (method: string, path: string) =>
-  path.startsWith('/ai/') || (method === 'POST' && (path === '/laws/files' || path === '/laws/versions' || /^\/laws\/versions\/[^/]+\/extract$/.test(path)));
+  path.startsWith('/ai/') || (method === 'POST' && (path === '/laws/files' || /^\/cases\/[^/]+\/documents$/.test(path) || path === '/laws/versions' || /^\/laws\/versions\/[^/]+\/extract$/.test(path)));

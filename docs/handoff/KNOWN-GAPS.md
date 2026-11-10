@@ -35,7 +35,8 @@ Each has an automated test (`test/qa-matrix.test.ts`, `test/roles.test.ts`, `tes
 ## C. Intentionally incomplete: do not report as defects
 
 - **Statutory clocks have no day counts** (`days: null`, status `AWAITING_COUNSEL_CONFIRMATION`) and every case type is `DRAFT_PENDING_COUNSEL`, until Saudi counsel signs off `docs/COUNSEL-CONFIRMATIONS.md` (Labour Law Art. 72 periods as amended by M/44, Art. 66 penalty ceilings, Art. 71 oral-questioning scope, settlement prerequisite, appeal windows, retention periods). The engine will not assert law that counsel has not confirmed. **Counsel's answers will change workflow rules, so functional tests of Art. 66, Art. 72 and retention are provisional.**
-- **Not built yet:** Najiz integration, Nafath sign-in, a job queue (law-text extraction runs in the web process in the background), AI evaluation tasks (`pnpm eval:ai` is a stub), per-tenant role administration.
+- **Najiz** is built against a **simulator only** (see `docs/NAJIZ.md`): the real wire mapping is empty until a client has portal access. Test the rules, walls and failure handling; do not report the absence of real Najiz calls. `NAJIZ_MODE=simulated` must be refused in production: please try to enable it.
+- **Not built yet:** Nafath sign-in, a job queue (law-text extraction runs in the web process in the background), AI evaluation tasks (`pnpm eval:ai` is a stub), per-tenant role administration.
 - **The seeded law text is placeholder wording** marked `[نص تجريبي للاختبار فقط]`, not the gazetted text. Testing against real laws is an open item and is part of this pack (QA-TEST-PLAN §D).
 - **The QA realm and `docker-compose.qa.yml` were generated and checked for structure, but not booted in the build environment.** Expect to fix a setup detail on first boot (hostname, TLS, redirect URI) and tell us what it was.
 - AI output is always a draft and is never legal advice; that banner is intended.

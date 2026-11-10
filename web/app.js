@@ -18,6 +18,8 @@ const I = {
     ask:'Ask', askLaw:'Ask about the laws', askCase:'Ask about cases', question:'Question', draft:'Draft requiring human review — not legal advice',
     citations:'Citations', none:'None', noLaws:'No verified laws yet', stale:'Rules needing re-approval', article:'Article', saved:'Done', err:'Error', engine:'AI engine', engSov:'Our own model', engIk:'In-Kingdom cloud provider', consentT:'Authorisation to use an in-Kingdom provider', inclP:'Allow names and personal data to be sent', signName:'Name', signTitle:'Job title', ack:'I am authorised to sign and have read the full text', signB:'Sign and enable', revokeB:'Withdraw authorisation', signedBy:'Signed by', offNote:'No cloud provider is enabled for your organisation: no data leaves our infrastructure.', noAi:'AI is not enabled', ready:'Legal rules readiness', syncB:'Bind rules to verified laws', st_READY:'Ready', st_NEEDS_COUNSEL:'Needs counsel', st_NO_STATUTORY_RULES_MAPPED:'No statutory rules mapped yet', staleN:'Stale rules', unboundN:'Unbound', tabReview:'Law review (team)', source:'Source text', findings:'AI-extracted findings', accept:'Accept', rejectP:'Reject', pending:'Awaiting verification', nothing:'No versions under review', aiOnly:'AI proposals are visible to the platform team only, never to clients' },
 };
+Object.assign(I.ar, { nzTitle:'التقديم عبر ناجز', nzSim:'محاكاة: ليست ناجز الحقيقية ولن يُرفع أي طلب فعلي', nzOff:'ناجز غير مفعّل لمنشأتك', nzNotConfigured:'الربط بناجز غير مكتمل (ينتظر بيانات الوصول)', nzState:'حالة التقديم', nzPreview:'ما سيُرسل بالضبط', nzSubmit:'تقديم الدعوى عبر ناجز', nzSync:'تحديث من ناجز', nzReconcile:'مطابقة يدوية', nzBlocked:'غير متاح الآن', nzFiled:'تم رفعها (أدخل رقم المرجع)', nzNotFiled:'لم تُرفع', nzRef:'رقم مرجع ناجز', nzConfirm:'سيُرسل هذا إلى المحكمة ولا يمكن التراجع عنه. متابعة؟', NOT_SUBMITTED:'لم تُقدَّم', IN_PROGRESS:'قيد التنفيذ', UNCONFIRMED:'غير مؤكدة: تحتاج مطابقة', SUBMITTED:'قُدّمت', uploadDoc:'رفع مستند', docType:'نوع المستند (filing / exhibit)', file:'الملف', download:'تنزيل', parties:'الأطراف', forum:'الجهة', attachments:'المرفقات' });
+Object.assign(I.en, { nzTitle:'Filing through Najiz', nzSim:'SIMULATION: not the real Najiz, nothing is actually filed', nzOff:'Najiz is not enabled for your organisation', nzNotConfigured:'Najiz connection incomplete (waiting for access details)', nzState:'Filing status', nzPreview:'Exactly what will be sent', nzSubmit:'File the claim through Najiz', nzSync:'Update from Najiz', nzReconcile:'Reconcile manually', nzBlocked:'Not available now', nzFiled:'It was filed (enter the reference)', nzNotFiled:'It was not filed', nzRef:'Najiz reference', nzConfirm:'This will be sent to the court and cannot be undone. Continue?', NOT_SUBMITTED:'Not filed', IN_PROGRESS:'In progress', UNCONFIRMED:'Unconfirmed: needs reconciliation', SUBMITTED:'Filed', uploadDoc:'Upload document', docType:'Document type (filing / exhibit)', file:'File', download:'Download', parties:'Parties', forum:'Forum', attachments:'Attachments' });
 let lang = localStorage.getItem('lang') || 'ar';
 let user = localStorage.getItem('user') || 'a-hr-mgr';
 // Who the server says the selected account is. Tabs and admin-only panels follow this, never a hard-coded id.
@@ -38,6 +40,9 @@ async function api(method, path, body) {
   return { ok: r.ok, status: r.status, j };
 }
 const flash = (r) => alert(r.ok ? t('saved') : `${t('err')}: ${r.j.message ?? r.j.error}` + (r.j.blockers ? '\n- ' + r.j.blockers.map((b) => b.message).join('\n- ') : ''));
+const stLabel = (def, k) => lab((def?.states ?? []).find((x) => x.key === k)?.label) || k;
+const fLabel = (def, k) => lab((def?.fields ?? []).find((x) => x.key === k)?.label) || k;
+let defs = {};
 const lab = (x) => (x && typeof x === 'object' ? x[lang] ?? x.en : x);
 
 function chrome() {
@@ -61,6 +66,7 @@ function chrome() {
 }
 
 async function viewCases() {
+  defs = Object.fromEntries(((await api('GET', '/case-types')).j || []).map((d) => [d.key, d]));
   if (openId) return viewCase();
   const [types, list] = await Promise.all([api('GET', '/case-types'), api('GET', '/cases')]);
   $('#view').innerHTML = `
@@ -68,7 +74,7 @@ async function viewCases() {
     <select id="nt">${(types.j || []).map((d) => `<option value="${d.key}">${esc(lab(d.label))}</option>`).join('')}</select>
     <input id="nid" class="grow" placeholder="${t('id')}"><button id="mk">${t('create')}</button></div></div>
   <div class="card"><table><tr><th>${t('id')}</th><th>${t('type')}</th><th>${t('state')}</th><th></th></tr>
-  ${(list.j || []).map((c) => `<tr><td>${esc(c.id)}</td><td>${esc(c.caseTypeKey)}</td><td><span class="tag">${esc(c.state)}</span></td><td><a class="lnk" data-open="${esc(c.id)}">${t('open')}</a></td></tr>`).join('')}</table></div>`;
+  ${(list.j || []).map((c) => `<tr><td>${esc(c.id)}</td><td>${esc(c.caseTypeKey)}</td><td><span class="tag">${esc(stLabel(defs[c.caseTypeKey], c.state))}</span></td><td><a class="lnk" data-open="${esc(c.id)}">${t('open')}</a></td></tr>`).join('')}</table></div>`;
   $('#mk').onclick = async () => { const id = $('#nid').value.trim(); if (!id) return; flash(await api('POST', '/cases', { id, caseType: $('#nt').value, fields: {} })); render(); };
 }
 
@@ -80,18 +86,32 @@ async function viewCase() {
   const def = ((await api('GET', '/case-types')).j || []).find((x) => x.key === c.caseTypeKey);
   $('#view').innerHTML = `
   <p><a class="lnk" id="bk">← ${t('back')}</a></p>
-  <div class="card"><h3>${esc(c.id)} <span class="tag">${esc(c.state)}</span></h3><div class="mute">${esc(c.caseTypeKey)} · ${esc(c.confidentiality)}</div></div>
+  <div class="card"><h3>${esc(c.id)} <span class="tag">${esc(stLabel(def, c.state))}</span></h3><div class="mute">${esc(c.caseTypeKey)} · ${esc(c.confidentiality)}</div></div>
   <div class="card"><h3>${t('actions')}</h3>
    ${actions.map((a) => `<div class="row"><button data-act="${a.action}" ${a.allowed ? '' : 'disabled'}>${esc(lab(a.label))}</button>
      ${a.allowed ? '' : `<ul class="blk bad">${a.blockers.map((b) => `<li>${esc(b.message)}</li>`).join('')}</ul>`}</div>`).join('') || '—'}
    <div class="row mt8"><input id="role" placeholder="${t('role')} (hr_director)"><button class="alt" id="apv">${t('approve')}</button></div></div>
-  <div class="card"><h3>${t('fields')}</h3><table>${Object.entries(c.fields).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</table>
+  <div class="card"><h3>${t('fields')}</h3><table>${Object.entries(c.fields).map(([k, v]) => `<tr><td>${esc(fLabel(def, k))}</td><td>${esc(v)}</td></tr>`).join('')}</table>
    <div class="row"><select id="fk">${(def?.fields ?? []).map((f) => `<option value="${esc(f.key)}">${esc(lab(f.label))}</option>`).join('')}</select><span id="fvw" class="grow"></span><button class="alt" id="fs">${t('save')}</button></div></div>
-  <div class="card"><h3>${t('artifacts')}</h3><ul>${c.artifacts.map((a) => `<li>${esc(a.type)} <span class="mute">${esc(a.createdAt)}</span></li>`).join('')}</ul>
+  <div class="card"><h3>${t('artifacts')}</h3><ul>${c.artifacts.map((a) => `<li>${esc(a.type)} ${a.payload?.simulated ? '<span class="sim">SIM</span> ' : ''}${a.hash && a.payload?.name ? `<a class="lnk" data-dl="${esc(a.hash)}" data-name="${esc(a.payload.name)}">${esc(a.payload.name)} · ${t('download')}</a> ` : ''}<span class="mute">${esc(a.createdAt)}</span></li>`).join('')}</ul>
+   <div class="row"><input id="dt" placeholder="${t('docType')}"><input id="df" type="file"><button class="alt" id="du">${t('uploadDoc')}</button></div>
    <div class="row"><input id="at" class="grow" placeholder="${t('artType')}"><button class="alt" id="as">${t('addArtifact')}</button></div></div>
+  <div id="nz"></div>
   <div class="card"><h3>${t('audit')}</h3><p class="${au.j.integrity?.valid ? 'ok' : 'bad'}">${au.j.integrity?.valid ? t('chainOk') : t('chainBad')}</p>
    <ul>${(au.j.events || []).map((e) => `<li>${esc(e.type)} · ${esc(e.actorId)} <span class="mute">${esc(e.at)}</span></li>`).join('')}</ul></div>`;
   $('#bk').onclick = () => { openId = null; render(); };
+  document.querySelectorAll('[data-dl]').forEach((a) => (a.onclick = async () => {
+    const r = await fetch(`/cases/${encodeURIComponent(openId)}/documents/${a.dataset.dl}`, { headers: { authorization: Auth.header(user) } });
+    if (!r.ok) return flash({ ok: false, j: { error: r.status } });
+    const url = URL.createObjectURL(await r.blob()); const l = document.createElement('a'); l.href = url; l.download = a.dataset.name; l.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }));
+  $('#du').onclick = async () => {
+    const f = $('#df').files[0]; if (!f) return;
+    const fd = new FormData(); fd.set('file', f); fd.set('type', $('#dt').value);
+    const r = await fetch(`/cases/${encodeURIComponent(openId)}/documents?lang=${lang}`, { method: 'POST', headers: { authorization: Auth.header(user) }, body: fd });
+    flash({ ok: r.ok, j: await r.json().catch(() => ({})) }); render();
+  };
+  if (c.caseTypeKey === 'legal.matter') drawNajiz();
   document.querySelectorAll('[data-act]').forEach((b) => (b.onclick = async () => { flash(await api('POST', `/cases/${encodeURIComponent(openId)}/transitions/${b.dataset.act}`)); render(); }));
   $('#apv').onclick = async () => { flash(await api('POST', `/cases/${encodeURIComponent(openId)}/approvals`, { role: $('#role').value })); render(); };
   // Typed editor: the input matches the field's type, and the value is sent as that type (the server rejects anything else).
@@ -111,6 +131,28 @@ async function viewCase() {
     flash(await api('PATCH', `/cases/${encodeURIComponent(openId)}/fields`, { [f.key]: value })); render();
   };
   $('#as').onclick = async () => { flash(await api('POST', `/cases/${encodeURIComponent(openId)}/artifacts`, { id: 'a' + Date.now(), type: $('#at').value })); render(); };
+}
+
+async function drawNajiz() {
+  const r = await api('GET', `/cases/${encodeURIComponent(openId)}/najiz`);
+  if (!r.ok) return;
+  const n = r.j;
+  if (!n.enabled) { $('#nz').innerHTML = `<div class="card"><h3>${t('nzTitle')}</h3><p class="mute">${t('nzOff')}</p></div>`; return; }
+  const pv = n.preview;
+  $('#nz').innerHTML = `<div class="card"><h3>${t('nzTitle')}</h3>
+   ${n.simulated ? `<p class="sim">${t('nzSim')}</p>` : ''}${n.configured ? '' : `<p class="warn">${t('nzNotConfigured')}</p>`}
+   <p>${t('nzState')}: <span class="tag">${esc(t(n.state))}</span> ${n.najizRef ? `<span class="mute">${esc(n.najizRef)}</span>` : ''}</p>
+   ${pv ? `<div class="mt8"><b>${t('nzPreview')}</b><table>
+     <tr><td>${t('forum')}</td><td>${esc(pv.forum)}</td></tr><tr><td>${t('parties')}</td><td>${pv.parties.map((p) => esc(p.name)).join('، ')}</td></tr>
+     <tr><td>${t('attachments')}</td><td>${pv.attachments.map((a) => `${esc(a.name)} <span class="mute">${esc(a.sha256.slice(0, 12))}…</span>`).join('<br>')}</td></tr></table></div>` : ''}
+   ${n.blockedBy ? `<p class="mute">${t('nzBlocked')}: ${esc(n.blockedBy)}</p>` : ''}
+   <div class="row mt8"><button id="nzs" ${n.canSubmit ? '' : 'disabled'}>${t('nzSubmit')}</button>
+    <button class="alt" id="nzy" ${n.state === 'SUBMITTED' ? '' : 'disabled'}>${t('nzSync')}</button></div>
+   ${n.state === 'UNCONFIRMED' || n.state === 'IN_PROGRESS' ? `<div class="row mt8"><select id="nzo"><option value="filed">${t('nzFiled')}</option><option value="not_filed">${t('nzNotFiled')}</option></select><input id="nzr" placeholder="${t('nzRef')}"><button class="alt" id="nzc">${t('nzReconcile')}</button></div>` : ''}</div>`;
+  const base = `/cases/${encodeURIComponent(openId)}/najiz`;
+  if ($('#nzs')) $('#nzs').onclick = async () => { if (!confirm(t('nzConfirm'))) return; flash(await api('POST', base + '/submit')); render(); };
+  $('#nzy').onclick = async () => { flash(await api('POST', base + '/sync')); render(); };
+  if ($('#nzc')) $('#nzc').onclick = async () => { flash(await api('POST', base + '/reconcile', { outcome: $('#nzo').value, najizRef: $('#nzr').value || undefined })); render(); };
 }
 
 async function viewLaws() {

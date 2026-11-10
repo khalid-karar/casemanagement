@@ -161,6 +161,24 @@ The assistant must always produce a draft that needs human review, cite its sour
 | H7 | 301 requests in a minute from one account; 21 AI or upload requests in a minute | `429` with `Retry-After`; a different account is unaffected. Rotating `X-Forwarded-For` or other headers does not reset the limit. (Per instance, in memory.) |
 | H5 | Backup and restore, point-in-time recovery, encryption at rest, retention purge | **Not built.** Mark BLOCKED; these are open items |
 
+## I. Najiz filing (simulator until a client has portal access)
+
+Run with `NAJIZ_MODE=simulated` (QA only). Every item names the account to use; matter must be in Pre-action with a forum and a `filing` document.
+
+| # | Check | Expected |
+|---|---|---|
+| I1 | `a-counsel` submits with no approval | 409 `APPROVAL_REQUIRED`; nothing sent |
+| I2 | `a-counsel` approves as general counsel, then submits | still `APPROVAL_REQUIRED` (submitter cannot approve) |
+| I3 | `a-gc` approves, `a-counsel` submits | 201, reference starting `SIM-`; UI shows red SIMULATION banner |
+| I4 | Replace the filing after approval, submit | `APPROVAL_REQUIRED` again |
+| I5 | Matter not in Pre-action / labour without settlement record | blocked with the reason |
+| I6 | Add `exhibit` and `internal_memo` documents; check preview | only filing + exhibits listed |
+| I7 | Press submit twice quickly | exactly one filing |
+| I8 | Simulated lost answer (test hook) | UNCONFIRMED; resubmit blocked; `a-gc` reconciles with reference |
+| I9 | *Update from Najiz* after hearing and judgment | artifacts + downloadable judgment; case state unchanged; second update imports nothing |
+| I10 | `a-hr-mgr`, `b-counsel`, `a-aud-dir`, `a-ext-counsel` call every Najiz route | 404/403, never data |
+| I11 | Start with `NODE_ENV=production NAJIZ_MODE=simulated` | server refuses to start |
+
 ## Defect template
 
 ```

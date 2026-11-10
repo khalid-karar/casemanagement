@@ -4,6 +4,8 @@ import { LegalLibrary } from '../legal';
 import type { AiSettings } from '../ai/consent';
 import { defaultSettings } from '../ai/consent';
 
+export interface CaseDocument { sha256: string; name: string; mime: string; bytes: Uint8Array; uploadedBy: string; uploadedAt: string }
+
 export interface AiLogEntry { at: string; actorId: string; type: string; data: Record<string, unknown> }
 
 /** Everything inside one tenant-scoped transaction. */
@@ -24,6 +26,9 @@ export interface Repo {
    */
   lib<T>(tenantId: string, mode: 'read' | 'write', fn: (lib: LegalLibrary) => Promise<T> | T): Promise<T>;
   putFile(tenantId: string, f: { sha256: string; name: string; bytes: Uint8Array; uploadedBy: string }): Promise<void>;
+  /** Stores a case document under its SHA-256. Idempotent: the same bytes for the same case are stored once. */
+  putCaseDocument(tenantId: string, caseId: string, doc: CaseDocument): Promise<void>;
+  getCaseDocument(tenantId: string, caseId: string, sha256: string): Promise<CaseDocument | undefined>;
   getAiSettings(tenantId: string): Promise<AiSettings>;
   /** Saves the settings and appends the log entry in one transaction. */
   saveAiSettings(tenantId: string, s: AiSettings, entry: AiLogEntry): Promise<void>;
@@ -39,6 +44,9 @@ export class MemoryRepo implements Repo {
   private audit = new Map<string, AuditEvent[]>();
   private library = new LegalLibrary();
   files = new Map<string, { name: string; bytes: Uint8Array; uploadedBy: string }>();
+  private docs = new Map<string, CaseDocument>();
+  async putCaseDocument(t: string, caseId: string, d: CaseDocument) { const k = `${t}\u0000${caseId}\u0000${d.sha256}`; if (!this.docs.has(k)) this.docs.set(k, d); }
+  async getCaseDocument(t: string, caseId: string, sha256: string) { return this.docs.get(`${t}\u0000${caseId}\u0000${sha256}`); }
   private ai = new Map<string, AiSettings>();
   private aiLog = new Map<string, AiLogEntry[]>();
   async getAiSettings(t: string) { return this.ai.get(t) ?? defaultSettings(t); }
@@ -47,7 +55,14 @@ export class MemoryRepo implements Repo {
   async listAiLog(t: string, limit: number) { return (this.aiLog.get(t) ?? []).slice(-limit).reverse(); }
   private k = (t: string, id: string) => `${t}\u0000${id}`;
 
+  /** Transactions run one at a time, like Postgres row locks (`FOR UPDATE`) make two writers on one case take turns. */
+  private chain: Promise<unknown> = Promise.resolve();
   async tx<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
+    const run = this.chain.then(() => this.txNow(tenantId, fn));
+    this.chain = run.catch(() => undefined);
+    return run;
+  }
+  private async txNow<T>(tenantId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
     const self = this;
     return fn({
       async getCase(id) { return self.cases.get(self.k(tenantId, id)); },

@@ -27,3 +27,6 @@ a.lnk{color:var(--navy);cursor:pointer;text-decoration:underline}
 @media (max-width:600px){main{padding:12px}}
 
 .mt8{margin-top:8px}.w100{width:100%}.row.top{align-items:flex-start}
+#who{color:#fff;font-size:.9rem}
+header label,header .bar{color:#fff}
+.sim{background:#fdecea;border:1px solid var(--bad);color:var(--bad);padding:6px 10px;border-radius:8px;font-weight:700}

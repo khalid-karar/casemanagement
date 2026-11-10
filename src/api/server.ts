@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { createApp } from './app';
+import { najizFromEnv } from '../najiz/registry';
 import { Directory } from './auth';
 import { OidcAuthenticator } from './oidc';
 import { MemoryRepo } from './repo';
@@ -66,7 +67,8 @@ if (authMode === 'oidc') {
   });
   authInfo = { mode: 'oidc', issuer, clientId };
 }
-const app = createApp({ repo, directory: authn, authInfo, ...(provider ? { provider } : {}), ...(inKingdom ? { inKingdom } : {}), ...(paidOcr ? { paidOcr } : {}) });
+const najiz = najizFromEnv(process.env);
+const app = createApp({ repo, directory: authn, authInfo, ...(najiz ? { najiz } : {}), ...(provider ? { provider } : {}), ...(inKingdom ? { inKingdom } : {}), ...(paidOcr ? { paidOcr } : {}) });
 app.use('/*', serveStatic({ root: './web' }));
 const port = Number(process.env.PORT ?? 3000);
 serve({ fetch: app.fetch, port });
