@@ -179,6 +179,19 @@ Run with `NAJIZ_MODE=simulated` (QA only). Every item names the account to use; 
 | I10 | `a-hr-mgr`, `b-counsel`, `a-aud-dir`, `a-ext-counsel` call every Najiz route | 404/403, never data |
 | I11 | Start with `NODE_ENV=production NAJIZ_MODE=simulated` | server refuses to start |
 
+## J. Data protection and operations (new)
+| # | Test | Expected |
+|---|---|---|
+| J1 | With `DATA_MASTER_KEYS` set, create an HR case with a reporter identity and subject, then read the database directly (`select data from cases`) | Sensitive fields, party ids, artifact payloads show `enc:v1:…`; title and dates stay readable; the app still shows everything to permitted roles |
+| J2 | Upload a document, then read `case_documents.bytes` | Starts with `CMS1`, original text not present; download returns the original |
+| J3 | Start with `NODE_ENV=production` and no master key | Refuses to start |
+| J4 | Copy one encrypted value into another case's field (as database owner) and open that case | Error, nothing shown |
+| J5 | As the application role, query `cases` with another department's / lower clearance's scope (see `test/db-walls.test.ts`) | No rows; audit events and documents of those cases also hidden |
+| J6 | Sign out via Keycloak, replay the old token | 401 within ~10 s (needs the back-channel URL set in the realm) |
+| J7 | Tenant admin calls `POST /admin/revoke-sessions` for a user | That user's earlier tokens are refused; other users unaffected |
+| J8 | `pnpm anchors verify <tenant>` after the anchor job has run; then edit one audit row as owner and repeat | OK first, then reports HISTORY_REWRITTEN |
+| J9 | Run `scripts/backup.sh`, restore into an empty database with `scripts/restore.sh` | Counts match; wrong passphrase and non-empty target refused |
+
 ## Defect template
 
 ```
