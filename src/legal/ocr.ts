@@ -47,6 +47,25 @@ async function ocrImages(dir: string, files: string[]): Promise<OcrResult> {
   return { text: texts.join('\n\n'), pages: files.length, meanConfidence: confs.length ? confs.reduce((a, b) => a + b, 0) / confs.length : 0, lowConfidencePages: low };
 }
 
+/** Render PDF pages to PNG buffers at a consistent size (used by both local OCR and the paid vision engine). */
+export async function renderPdfPages(bytes: Uint8Array): Promise<Buffer[]> {
+  const dir = await mkdtemp(join(tmpdir(), 'rnd-'));
+  try {
+    await writeFile(join(dir, 'in.pdf'), bytes);
+    const info = await run('pdfinfo', [join(dir, 'in.pdf')], { timeout: 20_000 }).catch(() => ({ stdout: '' }));
+    const pages = Number(/Pages:\s+(\d+)/.exec(info.stdout)?.[1] ?? 0);
+    if (pages > MAX_PAGES) throw new Error('TOO_MANY_PAGES');
+    const wPts = Number(/Page size:\s+([\d.]+)\s+x/.exec(info.stdout)?.[1] ?? 595);
+    const dpi = Math.min(300, Math.max(100, Math.round(2000 / (wPts / 72))));
+    await run('pdftoppm', ['-r', String(dpi), '-png', join(dir, 'in.pdf'), join(dir, 'p')], { timeout: 300_000 });
+    const files = (await readdir(dir)).filter((f) => /^p-\d+\.png$/.test(f)).sort();
+    if (files.length === 0) throw new Error('NO_PAGES');
+    return await Promise.all(files.map((f) => readFile(join(dir, f))));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 /** OCR a PDF: render each page to an image, then read it. No shell is involved; arguments are never interpreted. */
 export async function ocrPdf(bytes: Uint8Array): Promise<OcrResult> {
   const dir = await mkdtemp(join(tmpdir(), 'ocr-'));

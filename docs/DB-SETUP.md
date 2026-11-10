@@ -40,3 +40,6 @@ Without these variables the Postgres tests are skipped and the same API suite ru
 ## Law file upload: OCR requirements
 The runtime needs `poppler-utils`, `tesseract-ocr` and `tesseract-ocr-ara` (the `Dockerfile` installs them). `/health` reports `"ocr": true|false`; without them, scans and Arabic PDFs are refused with 503.
 Arabic PDFs are always read by OCR, not from the PDF's text layer, because those layers commonly reverse letters or turn "لا" into "ال". OCR output carries a confidence score and is never trusted without human verification against the original file.
+
+## Paid OCR (optional, platform national-law uploads only)
+Set `PAID_OCR_API_KEY`, `PAID_OCR_MODEL` and optionally `PAID_OCR_KIND` (`anthropic` or `openai`-compatible) and `PAID_OCR_BASE_URL` (https only). It is used **only** for uploads made by the `platform` tenant (public national law). Uploads under any client tenant always use the in-Kingdom local OCR; this is enforced in code (`routeOcr`) and tested. If the paid engine fails, the system falls back to local OCR and tells the reviewer. Pick the vendor by testing it on real Saudi law scans, and require zero data retention and no training on submitted data in the contract.

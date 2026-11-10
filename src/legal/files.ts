@@ -1,11 +1,19 @@
 import { createHash } from 'node:crypto';
-import { ocrAvailable, ocrImage, ocrPdf, pdfTextLayer } from './ocr';
+import { ocrAvailable, ocrImage, ocrPdf, pdfTextLayer, renderPdfPages } from './ocr';
+import { readPages, routeOcr } from './vision';
+import type { OcrScope, VisionOcr } from './vision';
 
 export class FileError extends Error { constructor(public readonly code: string) { super(code); } }
 export const MAX_BYTES = 25 * 1024 * 1024;
 
 export type FileKind = 'pdf' | 'docx' | 'txt' | 'image';
-export type Method = 'text-layer' | 'ocr' | 'docx' | 'plain';
+export type Method = 'text-layer' | 'ocr' | 'paid-ocr' | 'docx' | 'plain';
+
+export interface ExtractOptions {
+  /** 'platform' = national law uploaded by the platform team; 'client' = anything uploaded under a client's account. */
+  scope: OcrScope;
+  paidOcr?: VisionOcr;
+}
 
 /** Decide by content, never by the file name or the browser-supplied type. */
 export function sniff(bytes: Uint8Array): FileKind {
@@ -37,7 +45,7 @@ const ARABIC = /[؀-ۿﭐ-﷿ﹰ-﻿]/;
  *    visual order or split lam-alef ligatures ("لا" becomes "ال"), which silently changes the meaning of a law.
  *  - Scans and images are OCR'd. Confidence is reported and low-confidence pages are named.
  */
-export async function extractText(bytes: Uint8Array): Promise<ExtractedFile> {
+export async function extractText(bytes: Uint8Array, opts: ExtractOptions = { scope: 'client' }): Promise<ExtractedFile> {
   if (bytes.byteLength === 0) throw new FileError('EMPTY_FILE');
   if (bytes.byteLength > MAX_BYTES) throw new FileError('FILE_TOO_LARGE');
   const kind = sniff(bytes);
@@ -46,6 +54,19 @@ export async function extractText(bytes: Uint8Array): Promise<ExtractedFile> {
   let text = '';
   let method: Method = 'plain';
   let confidence: number | null = null;
+
+  const viaPaid = async (pages: () => Promise<Buffer[]>): Promise<string | undefined> => {
+    if (routeOcr(opts.scope, opts.paidOcr) !== 'paid') return undefined;
+    try {
+      const texts = await readPages(opts.paidOcr!, await pages());
+      method = 'paid-ocr';
+      warnings.push(`PAID_OCR_USED (${opts.paidOcr!.name}): public law text was read by an external vision model. Check every article against the original before verifying.`);
+      return texts.join('\n\n');
+    } catch {
+      warnings.push('PAID_OCR_FAILED: fell back to the local OCR engine.');
+      return undefined;
+    }
+  };
 
   const fromOcr = async (fn: () => ReturnType<typeof ocrPdf>) => {
     if (!(await ocrAvailable())) throw new FileError('OCR_NOT_INSTALLED');
@@ -68,10 +89,12 @@ export async function extractText(bytes: Uint8Array): Promise<ExtractedFile> {
       if (layer.trim().length >= 20 && !ARABIC.test(layer)) {
         text = layer; method = 'text-layer';
       } else {
-        text = await fromOcr(() => ocrPdf(bytes));
+        text = (await viaPaid(() => renderPdfPages(bytes))) ?? (await fromOcr(() => ocrPdf(bytes)));
       }
     } else if (kind === 'image') {
-      text = await fromOcr(() => ocrImage(bytes, bytes[0] === 0xff ? 'jpg' : 'png'));
+      const isJpg = bytes[0] === 0xff;
+      // The paid vision API is sent PNG only; JPEG scans use the local engine.
+      text = (!isJpg ? await viaPaid(async () => [Buffer.from(bytes)]) : undefined) ?? (await fromOcr(() => ocrImage(bytes, isJpg ? 'jpg' : 'png')));
     } else if (kind === 'docx') {
       const mammoth = await import('mammoth');
       text = (await mammoth.extractRawText({ buffer: Buffer.from(bytes) })).value;

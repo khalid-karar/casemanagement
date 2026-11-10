@@ -3,3 +3,4 @@ export * from './ingest';
 export * from './library';
 export * from './extraction';
 export * from './files';
+export * from './vision';

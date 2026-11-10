@@ -10,11 +10,12 @@ import { CASE_TYPES } from '../case-types';
 import { FileError, LegalError, extractProposals, extractText } from '../legal';
 import type { LegalLibrary } from '../legal';
 import { ocrAvailable } from '../legal/ocr';
+import type { VisionOcr } from '../legal';
 import { legalStatus, syncBindings } from '../case-types/legal-sources';
 import { answerFromLaws, answerQuestion } from '../ai';
 import type { ChatProvider } from '../ai';
 
-export interface AppDeps { repo: Repo; directory: Directory; provider: ChatProvider; clock?: () => string }
+export interface AppDeps { repo: Repo; paidOcr?: VisionOcr; directory: Directory; provider: ChatProvider; clock?: () => string }
 type Env = { Variables: { user: Principal; lang: 'ar' | 'en' } };
 
 const T = {
@@ -33,7 +34,7 @@ const pickLang = (q: string | undefined, h: string | undefined): 'ar' | 'en' =>
 const STATIC = new Set(['/', '/index.html', '/app.js', '/style.css', '/favicon.ico']);
 
 export function createApp(deps: AppDeps) {
-  const { repo, directory, provider } = deps;
+  const { repo, directory, provider, paidOcr } = deps;
   const now = deps.clock ?? (() => new Date().toISOString());
   const app = new Hono<Env>();
 
@@ -63,7 +64,7 @@ export function createApp(deps: AppDeps) {
     return c.json({ error: 'BAD_REQUEST', message: T.badRequest[lang] }, 400);
   });
 
-  app.get('/health', async (c) => c.json({ ok: true, ocr: await ocrAvailable() }));
+  app.get('/health', async (c) => c.json({ ok: true, ocr: await ocrAvailable(), paidOcrForPlatformLaw: Boolean(paidOcr) }));
 
   // Not-found and not-permitted look identical so existence is not leaked across walls.
   const load = async (tx: Tx, id: string, user: Principal, action: 'read' | 'write' | 'transition' = 'read', lock = false) => {
@@ -186,7 +187,8 @@ export function createApp(deps: AppDeps) {
     const f = form['file'];
     if (!(f instanceof File)) throw new FileError('NO_FILE');
     const bytes = new Uint8Array(await f.arrayBuffer());
-    const out = await extractText(bytes);
+    // Scope is decided here from the authenticated tenant, never from the request.
+    const out = await extractText(bytes, { scope: u.tenantId === 'platform' ? 'platform' : 'client', ...(paidOcr ? { paidOcr } : {}) });
     await repo.putFile(u.tenantId, { sha256: out.sha256, name: f.name, bytes, uploadedBy: u.id });
     return c.json({ text: out.text, kind: out.kind, method: out.method, confidence: out.confidence, sha256: out.sha256, warnings: out.warnings });
   });

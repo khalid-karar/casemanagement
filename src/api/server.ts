@@ -5,6 +5,7 @@ import { Directory } from './auth';
 import { MemoryRepo } from './repo';
 import { PgRepo } from './pg-repo';
 import { openAICompatProvider } from '../ai';
+import { visionFromConfig } from '../legal';
 
 const directory = new Directory();
 const repo = process.env.DATABASE_URL
@@ -30,7 +31,17 @@ const provider = openAICompatProvider({
   ...(process.env.LLM_API_KEY ? { apiKey: process.env.LLM_API_KEY } : {}),
 });
 
-const app = createApp({ repo, directory, provider });
+// Optional paid OCR, used ONLY for national law uploaded by the platform team. Client uploads always stay on local OCR.
+if (process.env.PAID_OCR_API_KEY && !process.env.PAID_OCR_MODEL) throw new Error('PAID_OCR_MODEL is required when PAID_OCR_API_KEY is set');
+const paidOcr = process.env.PAID_OCR_API_KEY
+  ? visionFromConfig({
+      kind: (process.env.PAID_OCR_KIND as 'openai' | 'anthropic') ?? 'anthropic',
+      baseUrl: process.env.PAID_OCR_BASE_URL ?? 'https://api.anthropic.com',
+      model: process.env.PAID_OCR_MODEL!,
+      apiKey: process.env.PAID_OCR_API_KEY,
+    })
+  : undefined;
+const app = createApp({ repo, directory, provider, ...(paidOcr ? { paidOcr } : {}) });
 app.use('/*', serveStatic({ root: './web' }));
 const port = Number(process.env.PORT ?? 3000);
 serve({ fetch: app.fetch, port });
