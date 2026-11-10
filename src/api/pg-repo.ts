@@ -148,6 +148,14 @@ export class PgRepo implements Repo {
     });
   }
 
+  async loadRevocations() {
+    const r = await this.pool.query('SELECT subject, not_before FROM session_revocations');
+    return Object.fromEntries(r.rows.map((x) => [x.subject as string, Number(x.not_before)]));
+  }
+  async setRevocation(subject: string, notBefore: number) {
+    await this.pool.query('INSERT INTO session_revocations (subject, not_before, created_at) VALUES ($1,$2,$3) ON CONFLICT (subject) DO UPDATE SET not_before = GREATEST(session_revocations.not_before, EXCLUDED.not_before)', [subject, notBefore, new Date().toISOString()]);
+  }
+
   getTenantKeys(tenantId: string) {
     return this.run(tenantId, async (c) => (await c.query('SELECT version, master_key_id, wrapped, created_at FROM tenant_keys WHERE tenant_id = $1 ORDER BY version', [tenantId])).rows
       .map((r) => ({ version: Number(r.version), masterKeyId: r.master_key_id, wrapped: r.wrapped, createdAt: r.created_at }) as TenantKey));

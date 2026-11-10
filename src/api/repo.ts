@@ -1,6 +1,7 @@
 import { appendEvent, verifyChain } from '../engine';
 import type { Actor, AuditEvent, AuditEventInput, CaseState } from '../engine';
 import { LegalLibrary } from '../legal';
+import type { RevocationStore } from './revocation';
 import type { KeyStore, TenantKey } from '../security/crypto';
 import type { AiSettings } from '../ai/consent';
 import { defaultSettings } from '../ai/consent';
@@ -25,7 +26,7 @@ export interface Tx {
   getAudit(caseId: string): Promise<AuditEvent[]>;
 }
 
-export interface Repo extends KeyStore {
+export interface Repo extends KeyStore, RevocationStore {
   /** Runs fn in a transaction bound to one tenant; row-level security applies in Postgres. */
   tx<T>(scope: Scope, fn: (tx: Tx) => Promise<T>): Promise<T>;
   /**
@@ -53,6 +54,9 @@ export class MemoryRepo implements Repo {
   private library = new LegalLibrary();
   files = new Map<string, { name: string; bytes: Uint8Array; uploadedBy: string }>();
   private docs = new Map<string, CaseDocument>();
+  private revoked: Record<string, number> = {};
+  async loadRevocations() { return { ...this.revoked }; }
+  async setRevocation(s: string, nb: number) { this.revoked[s] = Math.max(nb, this.revoked[s] ?? 0); }
   private keys = new Map<string, TenantKey[]>();
   async getTenantKeys(t: string) { return [...(this.keys.get(t) ?? [])].sort((a, b) => a.version - b.version); }
   async putTenantKey(t: string, k: TenantKey) { const cur = this.keys.get(t) ?? []; if (cur.some((x) => x.version === k.version)) return false; this.keys.set(t, [...cur, k]); return true; }

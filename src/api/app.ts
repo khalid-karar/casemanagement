@@ -10,6 +10,7 @@ import type { Repo, Tx } from './repo';
 import { RateLimiter, isHeavyRoute } from './ratelimit';
 import { CASE_TYPES } from '../case-types';
 import { CryptoError } from '../security/crypto';
+import type { Revocations } from './revocation';
 import { FileError, LegalError, extractProposals, extractText } from '../legal';
 import { MAX_BYTES } from '../legal/files';
 import { ARTIFACT_TYPE, describeUpload, safeName } from './documents';
@@ -26,6 +27,10 @@ import { NajizRuleError, approverOf, currentApprovals, assertMaySubmit, importUp
 
 export interface AppDeps {
   repo: Repo; paidOcr?: VisionOcr;
+  /** Session revocation (sign-out and admin revoke take effect immediately). */
+  revocations?: Revocations;
+  /** Verifies an identity-provider logout token and returns the person it names. */
+  verifyLogoutToken?: (token: string) => Promise<string | undefined>;
   /** Resolves a verified Principal from an Authorization header (dev Directory or OIDC). */
   directory: { resolve(header: string | undefined): Principal | undefined | Promise<Principal | undefined> };
   /**
@@ -92,7 +97,7 @@ export function createApp(deps: AppDeps) {
     const idp = deps.authInfo?.issuer ? new URL(deps.authInfo.issuer).origin : '';
     c.header('content-security-policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ${idp}; frame-ancestors 'none'; base-uri 'none'; form-action 'self' ${idp}`.replace(/\s+;/g, ';'));
     c.header('cache-control', 'no-store');
-    if (c.req.path === '/health' || STATIC.has(c.req.path) || /^\/ui\/[a-z0-9-]+\.js$/.test(c.req.path)) return next();
+    if (c.req.path === '/health' || c.req.path === '/auth/backchannel-logout' || STATIC.has(c.req.path) || /^\/ui\/[a-z0-9-]+\.js$/.test(c.req.path)) return next();
     const user = await directory.resolve(c.req.header('authorization'));
     if (!user) return c.json({ error: 'UNAUTHENTICATED', message: T.unauthenticated[c.get('lang')] }, 401);
     c.set('user', user);
@@ -119,6 +124,29 @@ export function createApp(deps: AppDeps) {
     if (err instanceof CryptoError) { console.error(`decryption failure: ${err.code}`); return c.json({ error: 'SERVER_ERROR', message: T.badRequest[lang] }, 500); }
     // Never leak internals.
     return c.json({ error: 'BAD_REQUEST', message: T.badRequest[lang] }, 400);
+  });
+
+  // Called by the identity provider (no user session): the signature on the logout token is the authentication.
+  app.post('/auth/backchannel-logout', async (c) => {
+    c.header('cache-control', 'no-store');
+    if (!deps.verifyLogoutToken || !deps.revocations) return c.json({ error: 'NOT_ENABLED' }, 404);
+    const form = await c.req.parseBody().catch(() => ({} as Record<string, unknown>));
+    const tok = typeof form['logout_token'] === 'string' ? form['logout_token'] : '';
+    const sub = tok ? await deps.verifyLogoutToken(tok) : undefined;
+    if (!sub) return c.json({ error: 'INVALID_LOGOUT_TOKEN' }, 400);
+    await deps.revocations.revoke(sub);
+    return c.body(null, 200);
+  });
+  // A client admin ends every session of one person (a leaver, a lost laptop). Effective on all servers within seconds.
+  app.post('/admin/revoke-sessions', async (c) => {
+    const user = c.get('user');
+    if (user.tenantId === 'platform' || !user.roles.includes('tenant_admin')) throw new AccessDeniedError('ROLE_REQUIRED:tenant_admin');
+    if (!deps.revocations) return c.json({ error: 'NOT_ENABLED' }, 404);
+    const b = await c.req.json<{ subject?: string }>().catch(() => ({} as { subject?: string }));
+    if (!b.subject || typeof b.subject !== 'string' || b.subject.length > 200) return c.json({ error: 'INVALID_FIELDS' }, 400);
+    await deps.revocations.revoke(b.subject);
+    console.log(JSON.stringify({ event: 'sessions_revoked', by: user.id, tenant: user.tenantId, subject: b.subject }));
+    return c.json({ ok: true });
   });
 
   app.get('/auth/config', (c) => c.json(deps.authInfo ?? { mode: 'dev' }));

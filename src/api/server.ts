@@ -6,6 +6,7 @@ import { Directory } from './auth';
 import { OidcAuthenticator } from './oidc';
 import { MemoryRepo } from './repo';
 import { PgRepo } from './pg-repo';
+import { Revocations } from './revocation';
 import { DataCrypto, MasterKeys } from '../security/crypto';
 import { EncryptedRepo } from '../security/encrypted-repo';
 import { openAICompatProvider } from '../ai';
@@ -63,22 +64,28 @@ const paidOcr = process.env.PAID_OCR_API_KEY
     })
   : undefined;
 let authn: { resolve: (h: string | undefined) => any } = directory;
+const revocations = new Revocations(repo, Number(process.env.REVOCATION_POLL_MS ?? 10_000));
+await revocations.start();
+let verifyLogoutToken: ((t: string) => Promise<string | undefined>) | undefined;
 let authInfo: { mode: 'dev' | 'oidc'; issuer?: string; clientId?: string; users?: { id: string; name: string; tenantId: string }[] } =
   { mode: 'dev', users: TEST_USERS.map(({ id, name, tenantId }) => ({ id, name, tenantId })) };
 if (authMode === 'oidc') {
   const issuer = process.env.OIDC_ISSUER;
   if (!issuer) throw new Error('OIDC_ISSUER is required');
   const clientId = process.env.OIDC_CLIENT_ID ?? 'case-web';
-  authn = new OidcAuthenticator({
+  const oidc = new OidcAuthenticator({
     issuer,
     audience: process.env.OIDC_AUDIENCE ?? 'case-api',
     allowedClients: (process.env.OIDC_ALLOWED_CLIENTS ?? clientId).split(','),
     allowInsecureIssuer: process.env.OIDC_ALLOW_INSECURE_ISSUER === 'true' && process.env.NODE_ENV !== 'production',
+    revocations,
   });
+  authn = oidc;
+  verifyLogoutToken = (t) => oidc.verifyLogoutToken(t);
   authInfo = { mode: 'oidc', issuer, clientId };
 }
 const najiz = najizFromEnv(process.env);
-const app = createApp({ repo, directory: authn, authInfo, ...(najiz ? { najiz } : {}), ...(provider ? { provider } : {}), ...(inKingdom ? { inKingdom } : {}), ...(paidOcr ? { paidOcr } : {}) });
+const app = createApp({ repo, directory: authn, authInfo, revocations, ...(verifyLogoutToken ? { verifyLogoutToken } : {}), ...(najiz ? { najiz } : {}), ...(provider ? { provider } : {}), ...(inKingdom ? { inKingdom } : {}), ...(paidOcr ? { paidOcr } : {}) });
 app.use('/*', serveStatic({ root: './web' }));
 const port = Number(process.env.PORT ?? 3000);
 serve({ fetch: app.fetch, port });

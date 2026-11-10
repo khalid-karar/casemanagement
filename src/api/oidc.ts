@@ -13,6 +13,8 @@ export interface OidcConfig {
   /** Tests inject a key resolver; production uses the issuer's JWKS endpoint. */
   jwks?: JWTVerifyGetKey;
   allowInsecureIssuer?: boolean;
+  /** Rejects tokens issued before a person was revoked. */
+  revocations?: { isRevoked(subject: string, iat: number | undefined): boolean };
   clockToleranceSec?: number;
 }
 
@@ -94,9 +96,23 @@ export class OidcAuthenticator {
       // Access tokens only: refresh and ID tokens carry a different `typ`.
       if (payload.typ !== undefined && payload.typ !== 'Bearer') return undefined;
       if (typeof payload.azp !== 'string' || !this.cfg.allowedClients.includes(payload.azp)) return undefined;
+      if (this.cfg.revocations?.isRevoked(payload.sub!, payload.iat)) return undefined;
       return principalFromClaims(payload as JWTPayload & Record<string, unknown>);
     } catch {
       return undefined; // any verification failure is simply "not authenticated"
     }
+  }
+
+  /** OpenID back-channel logout: the identity provider tells us a person signed out. Returns the subject, or undefined if the token is not a valid logout token. */
+  async verifyLogoutToken(token: string): Promise<string | undefined> {
+    try {
+      const { payload } = await jwtVerify(token, this.keys, {
+        issuer: this.cfg.issuer, audience: this.cfg.allowedClients, algorithms: ['RS256', 'PS256', 'ES256'], clockTolerance: this.cfg.clockToleranceSec ?? 10, requiredClaims: ['iat', 'jti'],
+      });
+      const events = (payload as Record<string, any>)['events'];
+      if (!events || typeof events !== 'object' || !('http://schemas.openid.net/event/backchannel-logout' in events)) return undefined;
+      if ('nonce' in payload) return undefined; // logout tokens must not carry a nonce (spec), which also stops an ID token being replayed as one
+      return typeof payload.sub === 'string' && payload.sub ? payload.sub : undefined;
+    } catch { return undefined; }
   }
 }
