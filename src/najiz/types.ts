@@ -80,4 +80,6 @@ export interface NajizRegistry {
   gatewayFor(tenantId: string): NajizGateway | undefined;
   /** The client organisation as claimant. Comes from that client's Najiz onboarding (its unified national number), not from case data. */
   claimantFor(tenantId: string): FilingParty | undefined;
+  /** Clients with live Najiz access (what the scheduled sync visits). Empty for the simulator. */
+  tenantIds?(): string[];
 }

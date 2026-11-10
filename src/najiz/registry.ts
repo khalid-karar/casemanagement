@@ -33,5 +33,5 @@ export function najizFromEnv(env: NodeJS.ProcessEnv): NajizRegistry | undefined 
       claimant: { role: 'CLAIMANT', kind: 'ORGANISATION', ...t.claimant },
     });
   }
-  return { gatewayFor: (t) => gateways.get(t)?.gw, claimantFor: (t) => gateways.get(t)?.claimant };
+  return { gatewayFor: (t) => gateways.get(t)?.gw, claimantFor: (t) => gateways.get(t)?.claimant, tenantIds: () => [...gateways.keys()] };
 }

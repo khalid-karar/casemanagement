@@ -69,6 +69,7 @@ export class PgRepo implements Repo {
         async saveCase(cs: CaseState, ev: AuditEventInput, create?: boolean) {
           const args = [cs.tenantId, cs.id, cs.caseTypeKey, cs.caseTypeVersion, cs.department, cs.state, cs.confidentiality, JSON.stringify(cs), ev.at];
           if (create) {
+            await c.query("INSERT INTO tenant_registry (tenant_id, created_at) VALUES ($1, $2) ON CONFLICT DO NOTHING", [cs.tenantId, ev.at]);
             await c.query('INSERT INTO cases (tenant_id,id,case_type_key,case_type_version,department,state,confidentiality,data,updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', args);
           } else {
             const u = await c.query('UPDATE cases SET case_type_key=$3, case_type_version=$4, department=$5, state=$6, confidentiality=$7, data=$8, updated_at=$9 WHERE tenant_id=$1 AND id=$2', args);
@@ -146,6 +147,16 @@ export class PgRepo implements Repo {
       const r = (await c.query('SELECT sha256, name, mime, bytes, uploaded_by, uploaded_at FROM case_documents WHERE tenant_id = $1 AND case_id = $2 AND sha256 = $3', [tenantId, caseId, sha256])).rows[0];
       return r ? { sha256: String(r.sha256).trim(), name: r.name, mime: r.mime, bytes: new Uint8Array(r.bytes), uploadedBy: r.uploaded_by, uploadedAt: r.uploaded_at } as CaseDocument : undefined;
     });
+  }
+
+  async listTenants() { return (await this.pool.query('SELECT tenant_id FROM tenant_registry ORDER BY 1')).rows.map((r) => r.tenant_id as string); }
+  async withLock(name: string, fn: () => Promise<void>) {
+    const c = await this.pool.connect();
+    try {
+      if (!(await c.query('SELECT pg_try_advisory_lock(hashtext($1)) ok', [name])).rows[0].ok) return false;
+      try { await fn(); } finally { await c.query('SELECT pg_advisory_unlock(hashtext($1))', [name]); }
+      return true;
+    } finally { c.release(); }
   }
 
   async loadRevocations() {

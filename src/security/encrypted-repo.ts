@@ -80,5 +80,7 @@ export class EncryptedRepo implements Repo {
   putTenantKey = (t: string, k: TenantKey) => this.inner.putTenantKey(t, k);
   loadRevocations: Repo['loadRevocations'] = () => this.inner.loadRevocations();
   setRevocation: Repo['setRevocation'] = (s, n) => this.inner.setRevocation(s, n);
+  listTenants: Repo['listTenants'] = () => this.inner.listTenants();
+  withLock: Repo['withLock'] = (n, f) => this.inner.withLock(n, f);
   close = () => this.inner.close?.() ?? Promise.resolve();
 }

@@ -22,6 +22,7 @@ import { CONSENT_VERSION, answerFromLaws, answerQuestion, consentHash, consentTe
 import type { AiProviders, ChatProvider, InKingdomProvider } from '../ai';
 import { dashboard as buildDashboard, search as searchCases } from './summary';
 import { NajizError } from '../najiz/types';
+import { syncCase } from '../najiz/sync';
 import type { NajizRegistry } from '../najiz/types';
 import { NajizRuleError, approverOf, currentApprovals, assertMaySubmit, importUpdates, najizState, pendingArtifact, planPacket, reconcile, resolution } from '../najiz/workflow';
 
@@ -400,29 +401,9 @@ export function createApp(deps: AppDeps) {
     const cs0 = await repo.tx(user, (tx) => load(tx, caseId, user, 'write'));
     if (!cs0 || cs0.caseTypeKey !== 'legal.matter') return nf(c);
     if (!user.roles.includes('legal_counsel')) throw new AccessDeniedError('ROLE_REQUIRED:legal_counsel');
-    const st = najizState(cs0);
-    if (st.state !== 'SUBMITTED') throw new NajizRuleError('NOT_SUBMITTED');
-    let updates;
-    try { updates = await nz.gw.fetchUpdates(st.najizRef); }
-    catch (e) { const code = e instanceof NajizError ? e.code : 'UNAVAILABLE'; return c.json({ error: 'NAJIZ_' + code }, code === 'REJECTED' ? 422 : 503); }
-    const imp = importUpdates(cs0, updates, nz.gw.simulated);
-    for (const d of imp.documents) await repo.putCaseDocument(user, caseId, { ...d, uploadedBy: 'najiz', uploadedAt: now() });
-    const out = await repo.tx(user, async (tx) => {
-      let cs = await load(tx, caseId, user, 'write', true);
-      if (!cs) return undefined;
-      for (const a of imp.artifacts) {
-        if (cs.artifacts.some((x) => x.id === a.id)) continue; // a concurrent sync already imported it
-        const m = addArtifact(cs, a, user, now());
-        await tx.saveCase(m.case, m.event); cs = m.case;
-      }
-      // Fill the court case number only if it is empty: never overwrite what counsel recorded.
-      if (imp.courtCaseNumber && !cs.fields['courtCaseNumber']) {
-        try { const m = setFields(cs, { courtCaseNumber: imp.courtCaseNumber }, user, now(), CASE_TYPES[cs.caseTypeKey]!); await tx.saveCase(m.case, m.event); cs = m.case; } catch { /* locked or invalid: leave it */ }
-      }
-      return cs;
-    });
-    // Deliberately no transition: counsel records the hearing / judgment step, under the normal guards.
-    return out ? c.json({ status: updates.status, imported: imp.artifacts.filter((a) => a.type !== 'najiz_status').length, case: view(out, user) }) : nf(c);
+    const r = await syncCase(repo, nz.gw, user, caseId, now);
+    if (!r.ok) return r.error === 'NOT_FOUND' ? nf(c) : c.json({ error: 'NAJIZ_' + r.error }, r.error === 'REJECTED' ? 422 : 503);
+    return c.json({ status: r.status, imported: r.imported, case: view(r.case, user) });
   });
 
   // ---- Legal library -----------------------------------------------------------

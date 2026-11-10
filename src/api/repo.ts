@@ -44,6 +44,10 @@ export interface Repo extends KeyStore, RevocationStore {
   logAi(tenantId: string, entry: AiLogEntry): Promise<void>;
   listAiLog(tenantId: string, limit: number): Promise<AiLogEntry[]>;
   verifyChain(events: AuditEvent[]): ReturnType<typeof verifyChain>;
+  /** Every tenant that has data (for background jobs). */
+  listTenants(): Promise<string[]>;
+  /** Runs fn only if no other server holds the named lock (so a scheduled job runs on one server at a time). Returns false when skipped. */
+  withLock(name: string, fn: () => Promise<void>): Promise<boolean>;
   close?(): Promise<void>;
 }
 
@@ -57,6 +61,9 @@ export class MemoryRepo implements Repo {
   private revoked: Record<string, number> = {};
   async loadRevocations() { return { ...this.revoked }; }
   async setRevocation(s: string, nb: number) { this.revoked[s] = Math.max(nb, this.revoked[s] ?? 0); }
+  private locks = new Set<string>();
+  async listTenants() { return [...new Set([...this.cases.values()].map((c) => c.tenantId))].sort(); }
+  async withLock(name: string, fn: () => Promise<void>) { if (this.locks.has(name)) return false; this.locks.add(name); try { await fn(); return true; } finally { this.locks.delete(name); } }
   private keys = new Map<string, TenantKey[]>();
   async getTenantKeys(t: string) { return [...(this.keys.get(t) ?? [])].sort((a, b) => a.version - b.version); }
   async putTenantKey(t: string, k: TenantKey) { const cur = this.keys.get(t) ?? []; if (cur.some((x) => x.version === k.version)) return false; this.keys.set(t, [...cur, k]); return true; }

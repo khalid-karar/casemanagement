@@ -7,6 +7,10 @@ import { OidcAuthenticator } from './oidc';
 import { MemoryRepo } from './repo';
 import { PgRepo } from './pg-repo';
 import { Revocations } from './revocation';
+import { Scheduler } from '../ops/scheduler';
+import type { Job } from '../ops/scheduler';
+import { FileAnchorSink, anchorAll } from '../ops/anchor';
+import { syncTenant } from '../najiz/sync';
 import { DataCrypto, MasterKeys } from '../security/crypto';
 import { EncryptedRepo } from '../security/encrypted-repo';
 import { openAICompatProvider } from '../ai';
@@ -86,6 +90,23 @@ if (authMode === 'oidc') {
 }
 const najiz = najizFromEnv(process.env);
 const app = createApp({ repo, directory: authn, authInfo, revocations, ...(verifyLogoutToken ? { verifyLogoutToken } : {}), ...(najiz ? { najiz } : {}), ...(provider ? { provider } : {}), ...(inKingdom ? { inKingdom } : {}), ...(paidOcr ? { paidOcr } : {}) });
+
+// Background jobs: each runs on one server at a time and is safe to repeat.
+const jobs: Job[] = [];
+const najizTenants = najiz?.tenantIds?.() ?? [];
+if (najiz && najizTenants.length) {
+  jobs.push({ name: 'najiz-sync', everyMs: Number(process.env.NAJIZ_SYNC_MINUTES ?? 15) * 60_000, run: async () => {
+    const out: Record<string, unknown> = {};
+    for (const t of najizTenants) { const gw = najiz.gatewayFor(t); if (gw?.configured) out[t] = await syncTenant(repo, gw, t, () => new Date().toISOString()); }
+    return out;
+  } });
+}
+if (process.env.ANCHOR_DIR) {
+  const sink = new FileAnchorSink(process.env.ANCHOR_DIR);
+  jobs.push({ name: 'audit-anchor', everyMs: Number(process.env.ANCHOR_MINUTES ?? 60) * 60_000, run: () => anchorAll(repo, sink, new Date().toISOString()) });
+} else console.warn('ANCHOR_DIR not set: audit chain heads are not being anchored outside the database (docs/OPERATIONS.md).');
+new Scheduler(repo, jobs).start();
+
 app.use('/*', serveStatic({ root: './web' }));
 const port = Number(process.env.PORT ?? 3000);
 serve({ fetch: app.fetch, port });
