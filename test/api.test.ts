@@ -29,6 +29,8 @@ const backends: Array<[string, () => Promise<Repo>]> = [
   ...(PG_ENABLED ? [['postgres', async () => { await resetData(); return newRepo(); }] as [string, () => Promise<Repo>]] : []),
 ];
 import { beforeAll } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { ocrAvailable } from '../src/legal/ocr';
 beforeAll(async () => { if (PG_ENABLED) await freshDatabase(); });
 
 describe.each(backends)('API on %s', (_name, mk) => {
@@ -80,6 +82,23 @@ describe.each(backends)('API on %s', (_name, mk) => {
     const r = await app.request('/cases', { method: 'POST', headers: { authorization: 'Bearer dev:mgr', 'content-type': 'application/json' }, body: '{bad' });
     expect(r.status).toBe(400);
     expect(JSON.stringify(await r.json())).not.toMatch(/Syntax|at /);
+  });
+});
+
+describe('API file upload', () => {
+  it('OCRs an Arabic PDF end to end and tells the reviewer it was OCR', async () => {
+    if (!(await ocrAvailable())) return;
+    const app = await build0(new MemoryRepo());
+    const fd = new FormData();
+    fd.append('file', new File([readFileSync(new URL('./fixtures/law-ar-digital.pdf', import.meta.url))], 'law.pdf', { type: 'application/pdf' }));
+    const r = await app.request('/laws/files', { method: 'POST', headers: { authorization: 'Bearer dev:editor' }, body: fd });
+    const j = (await r.json()) as any;
+    expect(r.status).toBe(200);
+    expect(j.method).toBe('ocr');
+    expect(j.text).toContain('لا يجوز توقيع جزاء');
+    expect(j.warnings[0]).toMatch(/^OCR_USED/);
+    const denied = await app.request('/laws/files', { method: 'POST', headers: { authorization: 'Bearer dev:mgr' }, body: fd });
+    expect(denied.status).toBe(403);
   });
 });
 

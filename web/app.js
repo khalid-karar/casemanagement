@@ -107,7 +107,7 @@ async function viewReview() {
     <div class="card"><h3>${t('upload')}</h3>
    <div class="row"><input id="li" placeholder="${t('instId')}"><input id="lt" class="grow" placeholder="${t('titleAr')}"><button class="alt" id="lia">${t('create')}</button></div>
    <div class="row" style="margin-top:8px"><input id="vi" placeholder="${t('verId')}"><input id="vl" placeholder="${t('label')}"><input id="ve" type="date" title="${t('eff')}"><input id="vin" placeholder="${t('instId')}"></div>
-   <div class="row" style="margin-top:8px"><input type="file" id="vf" accept=".pdf,.docx,.txt"><span class="mute">PDF · Word · TXT</span></div>
+   <div class="row" style="margin-top:8px"><input type="file" id="vf" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg"><span class="mute">PDF · Word · TXT · PNG/JPG (OCR)</span></div>
    <textarea id="vt" rows="6" style="width:100%;margin-top:8px" placeholder="${t('text')}"></textarea>
    <div class="row"><button id="vu">${t('upload')}</button></div></div>
   ${list.map((v) => `<div class="card"><h3>${esc(v.id)} · ${esc(v.versionLabel)} <span class="tag">${esc(v.status)}</span> <span class="mute">${esc(v.effectiveFrom)}</span></h3>
@@ -126,6 +126,7 @@ async function viewReview() {
     const j = await r.json();
     if (!r.ok) return alert(`${t('err')}: ${j.error}`);
     $('#vt').value = j.text; fileSha = j.sha256;
+    if (j.method === 'ocr') alert(`OCR · ${j.confidence}/100`);
     if (j.warnings.length) alert(j.warnings.join('\n'));
   };
   $('#vu').onclick = async () => { const x = await api('POST', '/laws/versions', { ...(fileSha ? { sourceFileSha256: fileSha } : {}), id: $('#vi').value, instrumentId: $('#vin').value, versionLabel: $('#vl').value, effectiveFrom: $('#ve').value, rawText: $('#vt').value }); flash(x); if (x.ok && x.j.warnings?.length) alert(x.j.warnings.join('\n')); render(); };

@@ -56,6 +56,44 @@ describe('file extraction', () => {
   it('rejects binaries, empty and oversize files by content', async () => {
     await expect(extractText(new Uint8Array([1, 2, 0, 3, 4]))).rejects.toThrow(FileError);
     await expect(extractText(new Uint8Array())).rejects.toThrow('EMPTY_FILE');
-    await expect(extractText(new TextEncoder().encode('%PDF-1.4 not really a pdf'))).rejects.toThrow('UNREADABLE_FILE');
+    await expect(extractText(new TextEncoder().encode('%PDF-1.4 not really a pdf'))).rejects.toThrow(FileError);
+  });
+});
+
+import { readFileSync } from 'node:fs';
+import { ocrAvailable } from '../src/legal/ocr';
+const fx = (n: string) => new Uint8Array(readFileSync(new URL(`./fixtures/${n}`, import.meta.url)));
+const HAS_OCR = await ocrAvailable();
+const ARTICLE = 'لا يجوز توقيع جزاء على العامل إلا بعد إبلاغه كتابة بما نسب إليه';
+
+describe.skipIf(!HAS_OCR)('Arabic PDFs and OCR', () => {
+  it('reads an Arabic digital PDF correctly via OCR, not the broken text layer', async () => {
+    const r = await extractText(fx('law-ar-digital.pdf'));
+    expect(r.method).toBe('ocr');
+    expect(r.text).toContain('المادة 71');
+    expect(r.text).toContain(ARTICLE); // the text layer yields "ال يجوز ... إال بعد" which changes the law
+    expect(r.warnings.some((w) => w.startsWith('OCR_USED'))).toBe(true);
+  });
+  it('reads a scanned (image-only) PDF and an image', async () => {
+    for (const f of ['law-ar-scan.pdf', 'law-ar-scan-200dpi.pdf', 'law-ar-scan.png']) {
+      const r = await extractText(fx(f));
+      expect(r.method).toBe('ocr');
+      expect(r.text).toContain(ARTICLE);
+      expect(r.confidence).toBeGreaterThan(70);
+    }
+  });
+  it('uses the text layer for non-Arabic digital PDFs', async () => {
+    const r = await extractText(fx('law-en-digital.pdf'));
+    expect(r.method).toBe('text-layer');
+    expect(r.text).toContain('written notice');
+  });
+  it('reports lower confidence on a poor scan instead of pretending it is fine', async () => {
+    const good = await extractText(fx('law-ar-scan.png'));
+    const poor = await extractText(fx('law-ar-poor.png'));
+    expect(poor.confidence!).toBeLessThan(good.confidence!);
+    expect(poor.warnings.some((w) => w.startsWith('OCR_USED'))).toBe(true);
+  });
+  it('rejects a fake PDF without crashing', async () => {
+    await expect(extractText(new TextEncoder().encode('%PDF-1.4 garbage'))).rejects.toThrow(/UNREADABLE_FILE|NO_PAGES/);
   });
 });

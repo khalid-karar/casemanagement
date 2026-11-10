@@ -9,6 +9,7 @@ import type { Repo, Tx } from './repo';
 import { CASE_TYPES } from '../case-types';
 import { FileError, LegalError, extractProposals, extractText } from '../legal';
 import type { LegalLibrary } from '../legal';
+import { ocrAvailable } from '../legal/ocr';
 import { legalStatus, syncBindings } from '../case-types/legal-sources';
 import { answerFromLaws, answerQuestion } from '../ai';
 import type { ChatProvider } from '../ai';
@@ -55,14 +56,14 @@ export function createApp(deps: AppDeps) {
     }
     if (err instanceof AccessDeniedError) return c.json({ error: 'FORBIDDEN', reason: err.reason, message: T.forbidden[lang] }, 403);
     if (err instanceof ConflictOfInterestError) return c.json({ error: 'CONFLICT_OF_INTEREST', codes: err.codes, message: T.conflict[lang] }, 409);
-    if (err instanceof FileError) return c.json({ error: err.code, message: T.badRequest[lang] }, err.code === 'FILE_TOO_LARGE' ? 413 : 400);
+    if (err instanceof FileError) return c.json({ error: err.code, message: T.badRequest[lang] }, err.code === 'FILE_TOO_LARGE' ? 413 : err.code === 'OCR_NOT_INSTALLED' ? 503 : 400);
     if (err instanceof LegalError) return c.json({ error: err.code, message: T.forbidden[lang] }, err.code === 'UNKNOWN_VERSION' || err.code === 'UNKNOWN_INSTRUMENT' ? 404 : 403);
     if ((err as { code?: string }).code === '23505' || (err as Error).message === 'CASE_EXISTS') return c.json({ error: 'CASE_EXISTS', message: T.badRequest[lang] }, 409);
     // Never leak internals.
     return c.json({ error: 'BAD_REQUEST', message: T.badRequest[lang] }, 400);
   });
 
-  app.get('/health', (c) => c.json({ ok: true }));
+  app.get('/health', async (c) => c.json({ ok: true, ocr: await ocrAvailable() }));
 
   // Not-found and not-permitted look identical so existence is not leaked across walls.
   const load = async (tx: Tx, id: string, user: Principal, action: 'read' | 'write' | 'transition' = 'read', lock = false) => {
@@ -187,7 +188,7 @@ export function createApp(deps: AppDeps) {
     const bytes = new Uint8Array(await f.arrayBuffer());
     const out = await extractText(bytes);
     await repo.putFile(u.tenantId, { sha256: out.sha256, name: f.name, bytes, uploadedBy: u.id });
-    return c.json({ text: out.text, kind: out.kind, sha256: out.sha256, warnings: out.warnings });
+    return c.json({ text: out.text, kind: out.kind, method: out.method, confidence: out.confidence, sha256: out.sha256, warnings: out.warnings });
   });
   app.post('/laws/bindings/sync', async (c) => c.json(await wr(c, (l, u) => syncBindings(l, u, now()))));
   app.post('/laws/bindings/:id/reapprove', async (c) => c.json(await wr(c, (l, u) => l.reapproveBinding(decodeURIComponent(c.req.param('id')), u, now()))));
