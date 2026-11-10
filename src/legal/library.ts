@@ -1,5 +1,6 @@
 import type { Instrument, InstrumentVersion, LegalActor, Provision, RuleBinding } from './types';
 import { provisionHash, sourceHash, splitArticles } from './ingest';
+import type { Proposal } from './extraction';
 
 export class LegalError extends Error {
   constructor(public readonly code: string) { super(code); }
@@ -10,6 +11,7 @@ export class LegalLibrary {
   instruments = new Map<string, Instrument>();
   versions = new Map<string, InstrumentVersion>();
   bindings = new Map<string, RuleBinding>();
+  proposals = new Map<string, Proposal>();
   log: Array<{ at: string; actorId: string; type: string; ref: string }> = [];
 
   addInstrument(i: Instrument, actor: LegalActor, at: string) {
@@ -118,6 +120,30 @@ export class LegalLibrary {
       for (const provision of v.provisions) out.push({ instrument: inst, version: v, provision });
     }
     return out;
+  }
+
+  // ---- AI proposals: visible only to reviewers of the instrument's own scope ----
+  canSeeProposals(versionId: string, actor: LegalActor) {
+    const v = this.mustVersion(versionId);
+    const inst = this.mustInstrument(v.instrumentId);
+    const scoped = inst.tenantId === null ? actor.tenantId === 'platform' : actor.tenantId === inst.tenantId;
+    return scoped && (actor.roles.includes('legal_verifier') || actor.roles.includes('legal_content_editor'));
+  }
+  storeProposals(list: Proposal[]) { for (const p of list) this.proposals.set(p.id, p); }
+  proposalsFor(versionId: string, actor: LegalActor) {
+    if (!this.canSeeProposals(versionId, actor)) throw new LegalError('SCOPE_MISMATCH');
+    return [...this.proposals.values()].filter((p) => p.versionId === versionId);
+  }
+  decideProposal(id: string, accept: boolean, actor: LegalActor) {
+    const p = this.proposals.get(id);
+    if (!p) throw new LegalError('UNKNOWN_PROPOSAL');
+    if (!this.canSeeProposals(p.versionId, actor) || !actor.roles.includes('legal_verifier')) throw new LegalError('ROLE_REQUIRED:legal_verifier');
+    p.status = accept ? 'ACCEPTED' : 'REJECTED';
+    p.decidedBy = actor.id;
+    return p;
+  }
+  versionsFor(actor: LegalActor) {
+    return [...this.versions.values()].filter((v) => this.canSeeProposals(v.id, actor));
   }
 
   // ---- Rule bindings -------------------------------------------------------

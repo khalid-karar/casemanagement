@@ -7,7 +7,7 @@ const I = {
     verId:'معرّف النسخة', label:'وسم النسخة', eff:'تاريخ السريان', text:'النص الكامل (المادة 1 … المادة 2 …)', submit:'إرسال للمراجعة', verify:'توثيق (اعتماد)', reject:'رفض',
     draftNote:'نص غير موثّق: لا يراه المساعد الذكي ولا تُبنى عليه القواعد حتى يعتمده مراجع قانوني مختلف عن الرافع.',
     ask:'اسأل', askLaw:'سؤال عن الأنظمة', askCase:'سؤال عن القضايا', question:'السؤال', draft:'مسودة تتطلب مراجعة بشرية — ليست رأياً قانونياً',
-    citations:'المراجع', none:'لا شيء', noLaws:'لا توجد أنظمة موثّقة بعد', stale:'قواعد تحتاج إعادة اعتماد', article:'المادة', saved:'تم', err:'خطأ' },
+    citations:'المراجع', none:'لا شيء', noLaws:'لا توجد أنظمة موثّقة بعد', stale:'قواعد تحتاج إعادة اعتماد', article:'المادة', saved:'تم', err:'خطأ', tabReview:'مراجعة الأنظمة (للفريق)', source:'النص المصدر', findings:'ما استخرجه الذكاء الاصطناعي', accept:'قبول', rejectP:'رفض', pending:'بانتظار التوثيق', nothing:'لا توجد نسخ قيد المراجعة', aiOnly:'مقترحات الذكاء الاصطناعي تظهر لفريق المنصة فقط ولا يراها العملاء' },
   en: { app:'Case Management Platform', user:'User', tabCases:'Cases', tabLaws:'Legal library', tabAi:'AI assistant',
     newCase:'New case', type:'Type', id:'ID', create:'Create', state:'State', open:'Open', back:'Back',
     actions:'Available actions', blockers:'Blockers', run:'Run', fields:'Fields', artifacts:'Artifacts', audit:'Audit log',
@@ -16,7 +16,7 @@ const I = {
     verId:'Version ID', label:'Version label', eff:'Effective from', text:'Full text (Article 1 … Article 2 …)', submit:'Submit for review', verify:'Verify (approve)', reject:'Reject',
     draftNote:'Unverified text: invisible to the AI and rules until a different legal reviewer approves it.',
     ask:'Ask', askLaw:'Ask about the laws', askCase:'Ask about cases', question:'Question', draft:'Draft requiring human review — not legal advice',
-    citations:'Citations', none:'None', noLaws:'No verified laws yet', stale:'Rules needing re-approval', article:'Article', saved:'Done', err:'Error' },
+    citations:'Citations', none:'None', noLaws:'No verified laws yet', stale:'Rules needing re-approval', article:'Article', saved:'Done', err:'Error', tabReview:'Law review (team)', source:'Source text', findings:'AI-extracted findings', accept:'Accept', rejectP:'Reject', pending:'Awaiting verification', nothing:'No versions under review', aiOnly:'AI proposals are visible to the platform team only, never to clients' },
 };
 let lang = localStorage.getItem('lang') || 'ar';
 let user = localStorage.getItem('user') || 'hr-mgr';
@@ -26,6 +26,7 @@ const t = (k) => I[lang][k];
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const USERS = ['hr-mgr', 'hr-inv', 'hr-dir', 'counsel', 'editor', 'verifier'];
+const BACKOFFICE = ['editor', 'verifier'];
 
 async function api(method, path, body) {
   const r = await fetch(path + (path.includes('?') ? '&' : '?') + 'lang=' + lang, {
@@ -45,7 +46,9 @@ function chrome() {
   document.querySelector('[data-i=user]').textContent = t('user');
   $('#langBtn').textContent = lang === 'ar' ? 'English' : 'العربية';
   $('#user').innerHTML = USERS.map((u) => `<option value="${u}" ${u === user ? 'selected' : ''}>${u}</option>`).join('');
-  $('#tabs').innerHTML = [['cases', 'tabCases'], ['laws', 'tabLaws'], ['ai', 'tabAi']]
+  if (BACKOFFICE.includes(user) && tab !== 'review' && tab === 'cases') tab = 'review';
+  if (!BACKOFFICE.includes(user) && tab === 'review') tab = 'cases';
+  $('#tabs').innerHTML = (BACKOFFICE.includes(user) ? [['review', 'tabReview'], ['laws', 'tabLaws']] : [['cases', 'tabCases'], ['laws', 'tabLaws'], ['ai', 'tabAi']])
     .map(([k, n]) => `<button class="${tab === k ? 'on' : ''}" data-tab="${k}">${t(n)}</button>`).join('');
 }
 
@@ -92,16 +95,29 @@ async function viewLaws() {
   <div class="card"><h3>${t('lawsTitle')}</h3>
   ${(laws.j || []).length ? `<table>${laws.j.map((l) => `<tr><td>${esc(lang === 'ar' ? l.instrument : l.instrumentEn ?? l.instrument)}<div class="mute">${esc(l.version)} · ${esc(l.effectiveFrom)}</div></td><td>${t('article')} ${esc(l.article)}</td><td>${esc(l.textAr)}</td></tr>`).join('')}</table>` : `<p class="mute">${t('noLaws')}</p>`}</div>
   ${(stale.j || []).length ? `<div class="warn">${t('stale')}: ${stale.j.map((s) => esc(s.ruleRef)).join(', ')}</div>` : ''}
-  <div class="card"><h3>${t('upload')}</h3><div class="warn">${t('draftNote')}</div>
+`;
+}
+
+async function viewReview() {
+  const r = await api('GET', '/laws/review');
+  const list = (r.j || []).filter((v) => v.status === 'UNDER_REVIEW' || v.status === 'DRAFT');
+  $('#view').innerHTML = `<div class="warn">${t('aiOnly')}</div>
+    <div class="card"><h3>${t('upload')}</h3>
    <div class="row"><input id="li" placeholder="${t('instId')}"><input id="lt" class="grow" placeholder="${t('titleAr')}"><button class="alt" id="lia">${t('create')}</button></div>
    <div class="row" style="margin-top:8px"><input id="vi" placeholder="${t('verId')}"><input id="vl" placeholder="${t('label')}"><input id="ve" type="date" title="${t('eff')}"><input id="vin" placeholder="${t('instId')}"></div>
    <textarea id="vt" rows="6" style="width:100%;margin-top:8px" placeholder="${t('text')}"></textarea>
-   <div class="row"><button id="vu">${t('upload')}</button><button id="vv">${t('verify')}</button><button class="alt" id="vr">${t('reject')}</button></div></div>`;
+   <div class="row"><button id="vu">${t('upload')}</button></div></div>
+  ${list.map((v) => `<div class="card"><h3>${esc(v.id)} · ${esc(v.versionLabel)} <span class="tag">${esc(v.status)}</span> <span class="mute">${esc(v.effectiveFrom)}</span></h3>
+   <div class="row" style="align-items:flex-start"><div class="grow"><b>${t('source')}</b>${v.provisions.map((p) => `<p><b>${t('article')} ${esc(p.number)}</b><br>${esc(p.textAr)}</p>`).join('')}</div>
+   <div class="grow"><b>${t('findings')}</b>${v.proposals.map((p) => `<div class="card"><span class="tag">${esc(p.kind)}</span> ${t('article')} ${esc(p.provisionNumber)} <span class="tag">${esc(p.status)}</span><br>${esc(p.summary)}<div class="mute">«${esc(p.quote)}»</div>
+     <button class="alt" data-pd="${esc(p.id)}" data-d="accept">${t('accept')}</button> <button class="alt" data-pd="${esc(p.id)}" data-d="reject">${t('rejectP')}</button></div>`).join('') || `<p class="mute">${t('none')}</p>`}</div></div>
+   <div class="row"><button data-vv="${esc(v.id)}">${t('verify')}</button><button class="alt" data-vr="${esc(v.id)}">${t('reject')}</button></div></div>`).join('') || `<p class="mute">${t('nothing')}</p>`}`;
   const vid = () => encodeURIComponent($('#vi').value);
   $('#lia').onclick = async () => flash(await api('POST', '/laws/instruments', { id: $('#li').value, tenantId: null, kind: 'LAW', titleAr: $('#lt').value, issuer: '—' }));
-  $('#vu').onclick = async () => { const r = await api('POST', '/laws/versions', { id: $('#vi').value, instrumentId: $('#vin').value, versionLabel: $('#vl').value, effectiveFrom: $('#ve').value, rawText: $('#vt').value }); flash(r); if (r.ok && r.j.warnings?.length) alert(r.j.warnings.join('\n')); };
-  $('#vv').onclick = async () => { flash(await api('POST', `/laws/versions/${vid()}/verify`, { note: 'verified against official source' })); render(); };
-  $('#vr').onclick = async () => flash(await api('POST', `/laws/versions/${vid()}/reject`, { note: 'rejected' }));
+  $('#vu').onclick = async () => { const x = await api('POST', '/laws/versions', { id: $('#vi').value, instrumentId: $('#vin').value, versionLabel: $('#vl').value, effectiveFrom: $('#ve').value, rawText: $('#vt').value }); flash(x); if (x.ok && x.j.warnings?.length) alert(x.j.warnings.join('\n')); render(); };
+  document.querySelectorAll('[data-pd]').forEach((b) => (b.onclick = async () => { flash(await api('POST', `/laws/proposals/${encodeURIComponent(b.dataset.pd)}/${b.dataset.d}`)); render(); }));
+  document.querySelectorAll('[data-vv]').forEach((b) => (b.onclick = async () => { flash(await api('POST', `/laws/versions/${encodeURIComponent(b.dataset.vv)}/verify`, { note: 'verified against official source' })); render(); }));
+  document.querySelectorAll('[data-vr]').forEach((b) => (b.onclick = async () => { flash(await api('POST', `/laws/versions/${encodeURIComponent(b.dataset.vr)}/reject`, { note: 'rejected' })); render(); }));
 }
 
 function viewAi() {
@@ -113,7 +129,7 @@ function viewAi() {
   $('#ac').onclick = async () => show(await api('POST', '/ai/cases', { question: $('#q').value }));
 }
 
-async function render() { chrome(); if (tab === 'cases') await viewCases(); else if (tab === 'laws') await viewLaws(); else viewAi(); }
+async function render() { chrome(); if (tab === 'cases') await viewCases(); else if (tab === 'review') await viewReview(); else if (tab === 'laws') await viewLaws(); else viewAi(); }
 document.addEventListener('click', (e) => {
   const o = e.target.closest('[data-open]'); if (o) { openId = o.dataset.open; render(); }
   const tb = e.target.closest('[data-tab]'); if (tb) { tab = tb.dataset.tab; openId = null; render(); }

@@ -7,7 +7,7 @@ import type { Principal } from './auth';
 import { Directory } from './auth';
 import { Store } from './store';
 import { CASE_TYPES } from '../case-types';
-import { LegalError } from '../legal';
+import { LegalError, extractProposals } from '../legal';
 import { answerFromLaws, answerQuestion } from '../ai';
 import type { ChatProvider } from '../ai';
 
@@ -150,8 +150,22 @@ export function createApp(deps: AppDeps) {
     const u = lp(c.get('user'));
     const r = store.library.uploadVersion(await c.req.json(), u, now());
     store.library.submitForReview(r.version.id, u, now());
+    // Extraction runs in the background; the upload never waits on the model or fails because of it.
+    const inst = store.library.instruments.get(r.version.instrumentId)!;
+    void extractProposals(r.version, inst.tenantId, provider).then((x) => store.library.storeProposals(x.proposals)).catch(() => {});
     return c.json({ ...r, version: store.library.versions.get(r.version.id) }, 201);
   });
+  app.get('/laws/review', (c) => c.json(store.library.versionsFor(lp(c.get('user'))).map((v) => ({ ...v, proposals: store.library.proposalsFor(v.id, lp(c.get('user'))) }))));
+  app.post('/laws/versions/:id/extract', async (c) => {
+    const u = lp(c.get('user'));
+    if (!store.library.canSeeProposals(c.req.param('id'), u)) throw new LegalError('SCOPE_MISMATCH');
+    const v = store.library.versions.get(c.req.param('id'))!;
+    const inst = store.library.instruments.get(v.instrumentId)!;
+    const x = await extractProposals(v, inst.tenantId, provider);
+    store.library.storeProposals(x.proposals);
+    return c.json({ proposals: x.proposals.length, droppedUnquoted: x.droppedUnquoted });
+  });
+  app.post('/laws/proposals/:id/:decision', (c) => c.json(store.library.decideProposal(c.req.param('id'), c.req.param('decision') === 'accept', lp(c.get('user')))));
   app.post('/laws/versions/:id/submit', (c) => c.json(store.library.submitForReview(c.req.param('id'), lp(c.get('user')), now())));
   app.post('/laws/versions/:id/verify', async (c) => c.json(store.library.verify(c.req.param('id'), lp(c.get('user')), (await c.req.json()).note ?? '', now())));
   app.post('/laws/versions/:id/reject', async (c) => c.json(store.library.reject(c.req.param('id'), lp(c.get('user')), (await c.req.json()).note ?? '', now())));
