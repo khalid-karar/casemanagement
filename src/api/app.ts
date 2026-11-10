@@ -7,7 +7,8 @@ import type { Principal } from './auth';
 import { Directory } from './auth';
 import { Store } from './store';
 import { CASE_TYPES } from '../case-types';
-import { LegalError, extractProposals } from '../legal';
+import { FileError, LegalError, extractProposals, extractText } from '../legal';
+import { legalStatus, syncBindings } from '../case-types/legal-sources';
 import { answerFromLaws, answerQuestion } from '../ai';
 import type { ChatProvider } from '../ai';
 
@@ -53,6 +54,7 @@ export function createApp(deps: AppDeps) {
     }
     if (err instanceof AccessDeniedError) return c.json({ error: 'FORBIDDEN', reason: err.reason, message: T.forbidden[lang] }, 403);
     if (err instanceof ConflictOfInterestError) return c.json({ error: 'CONFLICT_OF_INTEREST', codes: err.codes, message: T.conflict[lang] }, 409);
+    if (err instanceof FileError) return c.json({ error: err.code, message: T.badRequest[lang] }, err.code === 'FILE_TOO_LARGE' ? 413 : 400);
     if (err instanceof LegalError) return c.json({ error: err.code, message: T.forbidden[lang] }, err.code === 'UNKNOWN_VERSION' || err.code === 'UNKNOWN_INSTRUMENT' ? 404 : 403);
     // Never leak internals.
     return c.json({ error: 'BAD_REQUEST', message: T.badRequest[lang] }, 400);
@@ -156,6 +158,21 @@ export function createApp(deps: AppDeps) {
     return c.json({ ...r, version: store.library.versions.get(r.version.id) }, 201);
   });
   app.get('/laws/review', (c) => c.json(store.library.versionsFor(lp(c.get('user'))).map((v) => ({ ...v, proposals: store.library.proposalsFor(v.id, lp(c.get('user'))) }))));
+  // File in, text out: nothing is stored as law until a person uploads the (edited) text and another verifies it.
+  app.post('/laws/files', async (c) => {
+    const u = lp(c.get('user'));
+    if (!u.roles.includes('legal_content_editor')) throw new LegalError('ROLE_REQUIRED:legal_content_editor');
+    const form = await c.req.parseBody();
+    const f = form['file'];
+    if (!(f instanceof File)) throw new FileError('NO_FILE');
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const out = await extractText(bytes);
+    store.files.set(out.sha256, { name: f.name, bytes, uploadedBy: u.id });
+    return c.json({ text: out.text, kind: out.kind, sha256: out.sha256, warnings: out.warnings });
+  });
+  app.post('/laws/bindings/sync', (c) => c.json(syncBindings(store.library, lp(c.get('user')), now())));
+  app.post('/laws/bindings/:id/reapprove', (c) => c.json(store.library.reapproveBinding(decodeURIComponent(c.req.param('id')), lp(c.get('user')), now())));
+  app.get('/laws/bindings', (c) => c.json([...store.library.bindings.values()]));
   app.post('/laws/versions/:id/extract', async (c) => {
     const u = lp(c.get('user'));
     if (!store.library.canSeeProposals(c.req.param('id'), u)) throw new LegalError('SCOPE_MISMATCH');

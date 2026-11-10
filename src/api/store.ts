@@ -7,6 +7,8 @@ export class Store {
   cases = new Map<string, CaseState>();
   audit = new Map<string, AuditEvent[]>();
   library = new LegalLibrary();
+  /** Original uploaded law files by sha256. Postgres/object storage replaces this. */
+  files = new Map<string, { name: string; bytes: Uint8Array; uploadedBy: string }>();
 
   save(c: CaseState, ev: AuditEventInput) {
     this.cases.set(c.id, c);

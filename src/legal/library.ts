@@ -23,7 +23,7 @@ export class LegalLibrary {
 
   /** Upload raw text; articles are split automatically into a DRAFT awaiting human review. */
   uploadVersion(
-    input: { id: string; instrumentId: string; versionLabel: string; effectiveFrom: string; amendedBy?: string; rawText: string; provisions?: Provision[] },
+    input: { id: string; instrumentId: string; versionLabel: string; effectiveFrom: string; amendedBy?: string; rawText: string; sourceFileSha256?: string; provisions?: Provision[] },
     actor: LegalActor,
     at: string,
   ) {
@@ -39,6 +39,7 @@ export class LegalLibrary {
       effectiveTo: null,
       ...(input.amendedBy ? { amendedBy: input.amendedBy } : {}),
       sourceHash: sourceHash(input.rawText),
+      ...(input.sourceFileSha256 ? { sourceFileSha256: input.sourceFileSha256 } : {}),
       provisions: split.provisions,
       status: 'DRAFT',
       uploadedBy: actor.id,

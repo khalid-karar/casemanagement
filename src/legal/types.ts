@@ -32,6 +32,8 @@ export interface InstrumentVersion {
   effectiveTo: string | null;
   amendedBy?: string;
   sourceHash: string;
+  /** Hash of the original uploaded file, kept so reviewers and auditors can tie text to its source. */
+  sourceFileSha256?: string;
   provisions: Provision[];
   status: VerificationStatus;
   uploadedBy: string;
