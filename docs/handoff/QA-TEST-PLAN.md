@@ -75,6 +75,35 @@ Use the seeded `HR-2026-002` (already at *Findings issued*, written questioning)
 | C2.4 | Legal hold | `a-counsel` places a hold; `a-records` tries to archive; `a-hr-mgr` tries to place one | Archive blocked; non-counsel hold refused |
 | C2.5 | Concurrency | Two accounts run a transition on the same case at the same moment | One succeeds, the other sees the new state; no duplicated audit entry |
 
+### C2b. Staged field freezes (`lockedFrom`)
+Each pack freezes its decision-bearing fields before close, not only at it. For every row, `PATCH /cases/:id/fields` one state **before** the freeze and one state **after**.
+
+| ID | Case type | Field | Frozen from | Expected |
+|---|---|---|---|---|
+| C2b.1 | HR | `reporterChannel` | TRIAGED | Editable at NEW; `409 FIELD_LOCKED` from TRIAGED on |
+| C2b.2 | HR | `subjectEmployee` | ASSIGNED | Editable at TRIAGED; locked from ASSIGNED on |
+| C2b.3 | HR | `allegationSummary`, `incidentDate` | FINDINGS_ISSUED | Editable at INVESTIGATING; locked from FINDINGS_ISSUED on |
+| C2b.4 | HR | `severity` | DECIDED | Editable at FINDINGS_ISSUED; locked from DECIDED on (Art. 66: severity sets the lawful penalty ceiling) |
+| C2b.5 | Security | `incidentType`, `location`, `occurredAt` | INVESTIGATING | Editable at ASSIGNED; locked from INVESTIGATING on |
+| C2b.6 | Security | `estimatedLossSar` | — | **Stays editable to close.** Flag it as a bug if it locks |
+| C2b.7 | Audit | `riskRating`, `condition`, `criteria`, `cause`, `effect` | AWAITING_RESPONSE | Editable at RATED; locked once issued to management |
+| C2b.8 | Legal | `forum`, `courtCaseNumber`, `opposingParty` | FILED | Editable at PRE_ACTION; locked from FILED on |
+| C2b.9 | Legal | `claimValueSar` | JUDGMENT | Editable through HEARINGS; locked from JUDGMENT on |
+
+### C2c. Amendments to a closed case
+`POST /cases/:id/amendments` with `{ id, field, correctedValue, reason }`. The field itself is never rewritten.
+
+| ID | Step | Expected |
+|---|---|---|
+| C2c.1 | `a-case-mgr` amends `allegationSummary` on a CLOSED case | `200`; `fields.allegationSummary` still shows the original, `amendments[]` carries the correction with author and timestamp |
+| C2c.2 | `a-hr-mgr` (no `case_manager`/`legal_counsel`) tries the same | `403 ROLE_REQUIRED:case_manager` |
+| C2c.3 | Amend a case that is still open | `400 CASE_NOT_CLOSED` — use the field edit path |
+| C2c.4 | Reason under 10 characters; unknown field; invalid enum value; corrected value equal to the original | `400` on each (`REASON_REQUIRED`, `UNKNOWN_FIELD`, `NOT_AN_ALLOWED_OPTION`, `NO_CHANGE`) |
+| C2c.5 | Reuse an amendment id | `403 AMENDMENT_ID_EXISTS`; amendments are append-only |
+| C2c.6 | Amend `reporterIdentity` as `a-case-mgr`, then as `a-ethics` | Refused without the sealed role; allowed with it |
+| C2c.7 | Read an amended case as `a-assurance`, `a-low`, `a-sec-mgr` | Amendment values are `[REDACTED]` exactly where the field itself is. **Check every route that returns a case, not just `GET`** |
+| C2c.8 | Read the audit trail after amending a sealed or personal field | `case.amended` carries `fromSha256`/`toSha256`, never the value |
+
 ### C3. SLA and calendar
 SLA targets and the Saudi calendar (Friday and Saturday weekend, tenant-supplied holidays, Asia/Riyadh) exist in the engine and have unit tests, but are **not yet exposed in the API or UI**. Not testable manually yet. Note any expectation you have about holidays and Hijri dates for the product backlog.
 

@@ -35,15 +35,25 @@ export const hrMisconduct = defineCaseType({
   defaultConfidentiality: 'RESTRICTED',
   retentionYears: null,
   fields: [
-    { key: 'allegationSummary', label: { en: 'Allegation summary', ar: 'ملخص المخالفة المنسوبة' }, type: 'longtext', required: true },
-    { key: 'incidentDate', label: { en: 'Incident date', ar: 'تاريخ الواقعة' }, type: 'date' },
-    { key: 'subjectEmployee', label: { en: 'Subject employee', ar: 'الموظف المنسوب إليه' }, type: 'person', sensitivity: 'PERSONAL' },
-    { key: 'severity', label: { en: 'Severity', ar: 'الخطورة' }, type: 'enum', options: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] },
+    // Art. 71: the employee is questioned on a specific allegation and defends it. If the text could
+    // still change after findings, the recorded defence would no longer match what was charged.
+    { key: 'allegationSummary', label: { en: 'Allegation summary', ar: 'ملخص المخالفة المنسوبة' }, type: 'longtext', required: true, lockedFrom: 'FINDINGS_ISSUED' },
+    // Drives the limitation period, so it must be fixed by the time findings are issued.
+    { key: 'incidentDate', label: { en: 'Incident date', ar: 'تاريخ الواقعة' }, type: 'date', lockedFrom: 'FINDINGS_ISSUED' },
+    // Changing the respondent mid-case is a new case, not an edit: it also defeats the
+    // conflict-of-interest check that ran at assignment.
+    { key: 'subjectEmployee', label: { en: 'Subject employee', ar: 'الموظف المنسوب إليه' }, type: 'person', sensitivity: 'PERSONAL', lockedFrom: 'ASSIGNED' },
+    // Art. 66: severity sets the lawful penalty ceiling. Editable after the decision, it would let the
+    // proportionality record be rewritten to fit the penalty already imposed.
+    { key: 'severity', label: { en: 'Severity', ar: 'الخطورة' }, type: 'enum', options: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'], lockedFrom: 'DECIDED' },
     {
       key: 'reporterChannel',
       label: { en: 'Intake channel', ar: 'قناة الإبلاغ' },
       type: 'enum',
       options: ['PORTAL', 'ANONYMOUS_PORTAL', 'HOTLINE', 'EMAIL', 'IN_PERSON'],
+      // Channel decides whether whistleblower protection (M/48) attaches; changing it later would
+      // retrospectively alter the reporter's protection status.
+      lockedFrom: 'TRIAGED',
     },
     { key: 'reporterIdentity', label: { en: 'Reporter identity', ar: 'هوية المبلّغ' }, type: 'person', sensitivity: 'SEALED' },
     {
@@ -51,16 +61,16 @@ export const hrMisconduct = defineCaseType({
       label: { en: 'Investigation outcome', ar: 'نتيجة التحقيق' },
       type: 'enum',
       options: ['SUBSTANTIATED_PENALTY', 'SUBSTANTIATED_NO_PENALTY', 'UNSUBSTANTIATED'],
-      lockedIn: ['DECIDED', 'PENALTY_NOTIFIED'], // a decision, once taken, is not edited: it is superseded by a new case
+      lockedFrom: 'DECIDED', // a decision, once taken, is not edited: it is superseded by a new case
     },
     {
       key: 'penaltyType',
       label: { en: 'Disciplinary penalty', ar: 'الجزاء التأديبي' },
       type: 'enum',
       options: ['WARNING', 'FINE_UP_TO_ONE_DAY_WAGE', 'FINE', 'SUSPENSION_WITHOUT_PAY', 'BONUS_DEPRIVATION', 'PROMOTION_DEFERRAL', 'DISMISSAL'],
-      lockedIn: ['DECIDED', 'PENALTY_NOTIFIED'],
+      lockedFrom: 'DECIDED',
     },
-    { key: 'decisionRationale', label: { en: 'Decision rationale', ar: 'مبررات القرار' }, type: 'longtext', lockedIn: ['DECIDED', 'PENALTY_NOTIFIED'] },
+    { key: 'decisionRationale', label: { en: 'Decision rationale', ar: 'مبررات القرار' }, type: 'longtext', lockedFrom: 'DECIDED' },
   ],
   states: [
     { key: 'NEW', label: { en: 'New', ar: 'جديدة' } },

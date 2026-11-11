@@ -1,4 +1,4 @@
-import type { Artifact, AuditEvent, CaseState, CorrectiveAction } from '../engine';
+import type { Amendment, Artifact, AuditEvent, CaseState, CorrectiveAction } from '../engine';
 import { tenantOf } from '../api/repo';
 import type { CaseDocument, Repo, Scope, Tx } from '../api/repo';
 import { CASE_TYPES } from '../case-types';
@@ -37,7 +37,13 @@ export class EncryptedRepo implements Repo {
     const parties = await Promise.all(c.parties.map(async (p) => ({ ...p, personId: this.dc.isEncrypted(p.personId) ? p.personId : await this.dc.encryptValue(t, `party|${c.id}`, p.personId) })));
     const artifacts = await Promise.all(c.artifacts.map(async (a): Promise<Artifact> => a.payload && !isEnc(a.payload) ? { ...a, payload: { [ENC]: await this.dc.encryptValue(t, `artifact|${c.id}|${a.id}`, a.payload) } } : a));
     const actions = await Promise.all(c.actions.map(async (a): Promise<CorrectiveAction> => this.dc.isEncrypted(a.description) ? a : { ...a, description: await this.dc.encryptValue(t, `action|${c.id}|${a.id}`, a.description) }));
-    return { ...c, fields, parties, artifacts, actions };
+    // A correction to a PERSONAL or SEALED field is as sensitive as the field it corrects.
+    const amendments = c.amendments && await Promise.all(c.amendments.map(async (a): Promise<Amendment> => {
+      if (!sens.has(a.field)) return a;
+      const enc = async (v: unknown, part: string) => v === undefined || v === null || this.dc.isEncrypted(v) ? v : this.dc.encryptValue(t, `amendment|${c.id}|${a.id}|${part}`, v);
+      return { ...a, originalValue: await enc(a.originalValue, 'original'), correctedValue: await enc(a.correctedValue, 'corrected') };
+    }));
+    return { ...c, fields, parties, artifacts, actions, ...(amendments ? { amendments } : {}) };
   }
 
   async open(c: CaseState): Promise<CaseState> {
@@ -47,7 +53,11 @@ export class EncryptedRepo implements Repo {
     const parties = await Promise.all(c.parties.map(async (p) => ({ ...p, personId: this.dc.isEncrypted(p.personId) ? String(await this.dc.decryptValue(t, `party|${c.id}`, p.personId)) : p.personId })));
     const artifacts = await Promise.all(c.artifacts.map(async (a): Promise<Artifact> => isEnc(a.payload) ? { ...a, payload: (await this.dc.decryptValue(t, `artifact|${c.id}|${a.id}`, a.payload[ENC])) as Record<string, unknown> } : a));
     const actions = await Promise.all(c.actions.map(async (a): Promise<CorrectiveAction> => this.dc.isEncrypted(a.description) ? { ...a, description: String(await this.dc.decryptValue(t, `action|${c.id}|${a.id}`, a.description)) } : a));
-    return { ...c, fields, parties, artifacts, actions };
+    const amendments = c.amendments && await Promise.all(c.amendments.map(async (a): Promise<Amendment> => {
+      const dec = async (v: unknown, part: string) => this.dc.isEncrypted(v) ? this.dc.decryptValue(t, `amendment|${c.id}|${a.id}|${part}`, v) : v;
+      return { ...a, originalValue: await dec(a.originalValue, 'original'), correctedValue: await dec(a.correctedValue, 'corrected') };
+    }));
+    return { ...c, fields, parties, artifacts, actions, ...(amendments ? { amendments } : {}) };
   }
 
   tx<T>(scope: Scope, fn: (tx: Tx) => Promise<T>): Promise<T> {

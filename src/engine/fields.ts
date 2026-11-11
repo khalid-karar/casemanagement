@@ -69,11 +69,23 @@ export function validateFields(def: CaseTypeDefinition, fields: Record<string, u
   if (problems.length) throw new FieldError('VALIDATION', problems);
 }
 
-/** Whether the case's current state freezes this field. */
+/**
+ * Whether the case's current state freezes this field.
+ *
+ * `lockedFrom` is resolved against the declared order of `states`, so a field frozen from DECIDED is
+ * frozen in DECIDED and every state after it. This reads the CURRENT state, not the case's history:
+ * the packs shipped here move strictly forward, so the two are equivalent. A pack that allows a
+ * backward transition would reopen the field on the way back — add `lockedIn` entries there instead.
+ */
 export function lockedBy(def: CaseTypeDefinition, c: CaseState, f: FieldDef): string | undefined {
   const kind = def.states.find((s) => s.key === c.state)?.kind ?? 'OPEN';
   if (kind !== 'OPEN') return 'CASE_CLOSED';
   if (f.lockedIn?.includes(c.state)) return 'FIELD_LOCKED_IN_STATE';
+  if (f.lockedFrom) {
+    const from = def.states.findIndex((s) => s.key === f.lockedFrom);
+    const now = def.states.findIndex((s) => s.key === c.state);
+    if (from >= 0 && now >= from) return 'FIELD_LOCKED_IN_STATE';
+  }
   return undefined;
 }
 

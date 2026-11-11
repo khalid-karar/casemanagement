@@ -39,6 +39,12 @@ export const FieldDef = z.object({
   sensitivity: Sensitivity.default('NORMAL'),
   /** States in which this field is frozen (every field is frozen once a case is CLOSED or ARCHIVED). */
   lockedIn: z.array(z.string()).optional(),
+  /**
+   * Freeze from this state onward, using the order of `states`. Prefer this over listing every later
+   * state in `lockedIn`: a state inserted into the lifecycle later would silently leave the field
+   * editable in it. Both may be set; either one freezing is enough.
+   */
+  lockedFrom: z.string().optional(),
 });
 export type FieldDef = z.infer<typeof FieldDef>;
 
@@ -204,6 +210,25 @@ export interface CorrectiveAction {
   completedAt?: string;
 }
 
+/**
+ * A correction to a closed case. Amendments never overwrite: the original field value stays exactly
+ * as it was when the case closed, and the correction sits beside it with its author and reason. That
+ * keeps the record immutable for a court or an auditor while still giving PDPL's right to have
+ * inaccurate personal data corrected somewhere to land.
+ */
+export interface Amendment {
+  id: string;
+  /** Field key on the case type. The value in `fields` is NOT changed. */
+  field: string;
+  /** What the field said when the case closed, carried for readers that show only the amendment. */
+  originalValue: unknown;
+  correctedValue: unknown;
+  /** Why the correction was made. Required: an unexplained correction is worse than none. */
+  reason: string;
+  authorId: string;
+  at: string;
+}
+
 export interface Assignee {
   id: string;
   reportsTo: string[];
@@ -230,6 +255,8 @@ export interface CaseState {
   artifacts: Artifact[];
   approvals: Approval[];
   actions: CorrectiveAction[];
+  /** Append-only corrections to a closed case. Absent on cases written before amendments existed. */
+  amendments?: Amendment[];
   legalHold?: LegalHold;
   parentCaseId?: string;
   matterId?: string;

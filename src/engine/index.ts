@@ -8,4 +8,5 @@ export * from './workflow';
 export * from './fields';
 export * from './sla';
 export * from './legalhold';
+export * from './amendment';
 export * from './referral';

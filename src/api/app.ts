@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import {
-  AccessDeniedError, ConflictOfInterestError, FieldError, TransitionBlockedError, addArtifact, addAction, applyTransition,
+  AccessDeniedError, ConflictOfInterestError, FieldError, TransitionBlockedError, addArtifact, addAction, amendCase, applyTransition,
   assignCase, canAccess, completeAction, createCase, evaluateTransition, placeLegalHold, recordApproval, redactForActor, releaseLegalHold, setFields, SAUDI_CALENDAR, slaForCase, statutoryClocks,
 } from '../engine';
 import type { Principal } from './auth';
@@ -434,6 +434,8 @@ export function createApp(deps: AppDeps) {
   app.post('/cases/:id/actions', mutate((cs, u, b) => addAction(cs, b, u, now())));
   app.post('/cases/:id/actions/:aid/complete', mutate((cs, u, _b, c) => completeAction(cs, c.req.param('aid'), u, now())));
   app.post('/cases/:id/approvals', mutate((cs, u, b) => recordApproval(cs, b.role, u, now()), 'transition'));
+  // Corrections to a closed case. The field is never overwritten; the correction is appended beside it.
+  app.post('/cases/:id/amendments', mutate((cs, u, b) => amendCase(cs, b, u, now(), CASE_TYPES[cs.caseTypeKey]!)));
   app.post('/cases/:id/legal-hold', mutate((cs, u, b) => placeLegalHold(cs, u, b.reason, now())));
   app.delete('/cases/:id/legal-hold', mutate((cs, u, b) => releaseLegalHold(cs, u, b.reason ?? '', now())));
 

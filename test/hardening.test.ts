@@ -43,12 +43,32 @@ describe('locks', () => {
       expect(problems(() => setFields(c, { severity: 'HIGH' }, mgr, now, hr))).toEqual({ kind: 'LOCKED', codes: ['severity:CASE_CLOSED'] });
     }
   });
-  it('freezes the decision fields at DECIDED but leaves the others editable, and a no-op is not a change', () => {
+  it('freezes the decision fields at DECIDED, severity included, and a no-op is not a change', () => {
     const c = { ...fresh({ outcome: 'SUBSTANTIATED_PENALTY', penaltyType: 'WARNING', severity: 'LOW' }), state: 'DECIDED' };
     expect(problems(() => setFields(c, { penaltyType: 'DISMISSAL' }, mgr, now, hr))).toEqual({ kind: 'LOCKED', codes: ['penaltyType:FIELD_LOCKED_IN_STATE'] });
     expect(problems(() => setFields(c, { outcome: 'UNSUBSTANTIATED' }, mgr, now, hr))).toMatchObject({ kind: 'LOCKED' });
-    expect(setFields(c, { severity: 'HIGH' }, mgr, now, hr).case.fields.severity).toBe('HIGH');
+    // Art. 66: severity sets the lawful penalty ceiling, so it cannot be restated to fit the penalty.
+    expect(problems(() => setFields(c, { severity: 'HIGH' }, mgr, now, hr))).toEqual({ kind: 'LOCKED', codes: ['severity:FIELD_LOCKED_IN_STATE'] });
     expect((setFields(c, { penaltyType: 'WARNING' }, mgr, now, hr).event.payload as any).changes).toEqual({}); // same value: nothing to lock or log
+  });
+
+  it('freezes each field from its own state onward, not all at once', () => {
+    // The allegation is editable while the case is being worked, and fixed once findings are issued:
+    // under Art. 71 the employee defends a specific allegation, which must not change afterwards.
+    const triaged = { ...fresh({ allegationSummary: 'first draft' }), state: 'TRIAGED' };
+    expect(setFields(triaged, { allegationSummary: 'corrected' }, mgr, now, hr).case.fields.allegationSummary).toBe('corrected');
+
+    for (const state of ['FINDINGS_ISSUED', 'DECIDED', 'PENALTY_NOTIFIED']) {
+      const c = { ...fresh({ allegationSummary: 'first draft' }), state };
+      expect(problems(() => setFields(c, { allegationSummary: 'rewritten' }, mgr, now, hr)), state)
+        .toEqual({ kind: 'LOCKED', codes: ['allegationSummary:FIELD_LOCKED_IN_STATE'] });
+    }
+
+    // The respondent is fixed at assignment: changing it would defeat the conflict-of-interest check
+    // that ran there, and is a new case rather than an edit.
+    const assigned = { ...fresh({ subjectEmployee: 'emp-1' }), state: 'ASSIGNED' };
+    expect(problems(() => setFields(assigned, { subjectEmployee: 'emp-2' }, mgr, now, hr)))
+      .toEqual({ kind: 'LOCKED', codes: ['subjectEmployee:FIELD_LOCKED_IN_STATE'] });
   });
 });
 
