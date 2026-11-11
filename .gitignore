@@ -6,3 +6,4 @@ dist/
 eval/results/
 *.log
 .DS_Store
+dist-demo
