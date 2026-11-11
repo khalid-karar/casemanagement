@@ -20,7 +20,7 @@ import type { VisionOcr } from '../legal';
 import { legalStatus, syncBindings } from '../case-types/legal-sources';
 import { CONSENT_VERSION, answerFromLaws, answerQuestion, consentHash, consentText, selectProvider } from '../ai';
 import type { AiProviders, ChatProvider, InKingdomProvider } from '../ai';
-import { dashboard as buildDashboard, search as searchCases } from './summary';
+import { dashboard as buildDashboard, search as searchCases, toCsv } from './summary';
 import { NajizError } from '../najiz/types';
 import { syncCase } from '../najiz/sync';
 import { makeNotifier, personToActor } from './notify';
@@ -245,6 +245,16 @@ export function createApp(deps: AppDeps) {
       q: q['q'] ?? '', state: q['state'] ?? '', dept: q['dept'] ?? '', type: q['type'] ?? '', mine: q['mine'] === '1', open: q['open'] === '1', overdue: q['overdue'] === '1', due: Number(q['due']) || 0, needsAction: q['needs'] === '1',
       sort: q['sort'] ?? 'updated', order: q['order'] === 'asc' ? 'asc' : 'desc', page: Number(q['page']) || 1, pageSize: Number(q['pageSize']) || 20,
     }));
+  });
+  // Same filters as the list; summaries only (no sealed or personal values), capped at 5,000 rows.
+  app.get('/cases/export.csv', async (c) => {
+    const user = c.get('user');
+    const q = c.req.query();
+    const all = await repo.tx(user, (tx) => tx.listCases());
+    const base = { q: q['q'] ?? '', state: q['state'] ?? '', dept: q['dept'] ?? '', type: q['type'] ?? '', mine: q['mine'] === '1', open: q['open'] === '1', overdue: q['overdue'] === '1', due: Number(q['due']) || 0, needsAction: q['needs'] === '1', sort: q['sort'] ?? 'updated', order: (q['order'] === 'asc' ? 'asc' : 'desc') as 'asc' | 'desc', pageSize: 100 };
+    const items = [];
+    for (let page = 1; page <= 50; page++) { const r = searchCases(all, user, CASE_TYPES, now(), { ...base, page }); items.push(...r.items); if (page * 100 >= r.total) break; }
+    return new Response(toCsv(items), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="cases-${now().slice(0, 10)}.csv"`, 'cache-control': 'no-store' } });
   });
   app.get('/dashboard', async (c) => {
     const user = c.get('user');

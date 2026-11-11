@@ -23,9 +23,9 @@
     const stepper = `<ol class="stepper" tabindex="0" aria-label="${esc(L.t('caseStateNow'))}">${steps.map((s, i) => `<li class="${i < nowIdx ? 'done' : i === nowIdx ? 'now' : ''}" ${i === nowIdx ? 'aria-current="step"' : ''}>${esc(L.lab(s.label))}<span class="sr-only"> (${esc(i < nowIdx ? L.t('stepsDone') : i === nowIdx ? L.t('stepNow') : '')})</span></li>`).join('')}</ol>`;
 
     const head = `<nav class="crumb" aria-label="breadcrumb"><a href="#/cases">${esc(L.t('cases'))}</a> ${K.ic(K.ar() ? 'chevL' : 'chevR')} <span class="code">${esc(c.id)}</span></nav>
-      <div class="page-h"><div><h2 id="h">${esc(String(title).slice(0, 120))}</h2><div class="row mt8"><span class="badge info">${esc(L.state(def, c.state))}</span><span class="badge">${esc(L.caseType(c.caseTypeKey))}</span><span class="badge">${esc(L.dept(c.department))}</span>${c.confidentiality !== 'STANDARD' ? `<span class="badge gold">${K.ic('lock')} ${esc(L.conf(c.confidentiality))}</span>` : ''}${c.legalHold ? `<span class="badge bad">${K.ic('lock')} ${esc(L.t('legalHold'))}</span>` : ''}<span class="mute">${esc(L.t('since'))} ${K.time(c.stateEnteredAt)}</span></div></div></div>
+      <div class="page-h"><div><h2 id="h">${esc(String(title).slice(0, 120))}</h2><div class="row mt8"><span class="badge info">${esc(L.state(def, c.state))}</span><span class="badge">${esc(L.caseType(c.caseTypeKey))}</span><span class="badge">${esc(L.dept(c.department))}</span>${c.confidentiality !== 'STANDARD' ? `<span class="badge gold">${K.ic('lock')} ${esc(L.conf(c.confidentiality))}</span>` : ''}${c.legalHold ? `<span class="badge bad">${K.ic('lock')} ${esc(L.t('legalHold'))}</span>` : ''}<span class="mute">${esc(L.t('since'))} ${K.time(c.stateEnteredAt)}</span></div></div><span class="spacer"></span><a class="btn secondary" href="#/cases/${encodeURIComponent(c.id)}/file">${K.ic('file')} ${esc(L.t('printFile'))}</a></div>
       <section class="card" aria-label="${esc(L.t('caseStateNow'))}">${stepper}</section>
-      <div class="tabs" role="tablist" aria-label="${esc(L.t('tabsLabel'))}">${tabs.map(([k, lbl, ic]) => `<button role="tab" id="tab-${k}" aria-selected="${k === tab}" aria-controls="panel" tabindex="${k === tab ? 0 : -1}" data-tab="${k}">${K.ic(ic)} ${esc(L.t(lbl))}</button>`).join('')}</div>`;
+      <div class="tabs" role="tablist" aria-label="${esc(L.t('tabsLabel'))}">${tabs.map(([k, lbl, ic]) => `<button role="tab" id="tab-${k}" aria-selected="${k === tab}" aria-controls="panel" tabindex="${k === tab || (tab === 'file' && k === 'overview') ? 0 : -1}" data-tab="${k}">${K.ic(ic)} ${esc(L.t(lbl))}</button>`).join('')}</div>`;
 
     let nz = null;
     if (def.domain === 'LEGAL') { const nr = await K.api('GET', base + '/najiz'); nz = nr.ok ? nr.j : { enabled: false }; }
@@ -64,11 +64,13 @@
     const notes = c.artifacts.filter((a) => a.type === 'note').sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     const canNote = c.access?.canNote !== false;
     const others = (K.s.people || []).filter((p) => p.id !== me.id);
+    const notesList = notes.length ? `<ul class="notes">${notes.map((n) => `<li><div class="note-h"><b>${esc(K.who(n.createdBy))}</b> ${K.time(n.createdAt)}</div><p class="note-t">${esc(n.payload?.text ?? '')}</p>${(n.payload?.mentions || []).length ? `<div class="mute">${(n.payload.mentions).map((m) => `<span class="chip-s">@${esc(K.who(m))}</span>`).join(' ')}</div>` : ''}</li>`).join('')}</ul>` : `<div class="empty">${K.ic('note')}<p>${esc(L.t('noNotes'))}</p></div>`;
     const notesTab = `<section class="card" aria-labelledby="nt-h"><div class="card-h">${K.ic('note')}<h3 id="nt-h">${esc(L.t('tabNotes'))}</h3></div>
       <form id="nf" class="stack-f"><label for="ntext">${esc(L.t('noteAdd'))}</label><textarea id="ntext" rows="3" maxlength="5000" placeholder="${esc(L.t('notePh'))}" required></textarea>
       <div class="row"><label class="sr-only" for="nment">${esc(L.t('mentions'))}</label><select id="nment"><option value="">@ ${esc(L.t('mentions'))}…</option>${others.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select><span id="nchips" class="chips"></span><span class="spacer"></span><button type="submit">${K.ic('send')} ${esc(L.t('notePost'))}</button></div>
       <p class="mute">${esc(L.t('mentionHint'))}</p></form>
-      ${notes.length ? `<ul class="notes">${notes.map((n) => `<li><div class="note-h"><b>${esc(K.who(n.createdBy))}</b> ${K.time(n.createdAt)}</div><p class="note-t">${esc(n.payload?.text ?? '')}</p>${(n.payload?.mentions || []).length ? `<div class="mute">${(n.payload.mentions).map((m) => `<span class="chip-s">@${esc(K.who(m))}</span>`).join(' ')}</div>` : ''}</li>`).join('')}</ul>` : `<div class="empty">${K.ic('note')}<p>${esc(L.t('noNotes'))}</p></div>`}</section>`;
+      ${notesList}
+    </section>`;
     const docsTab = `<section class="card"><div class="card-h">${K.ic('file')}<h3>${esc(L.t('docs'))}</h3></div>${docs.length ? `<table class="tbl stack"><thead><tr><th scope="col">${esc(L.t('docKind'))}</th><th scope="col">${esc(L.t('file'))}</th><th scope="col">${esc(L.t('addedBy'))}</th><th scope="col">${esc(L.t('sha'))}</th></tr></thead><tbody>${docs.map((a) => `<tr><td data-l="${esc(L.t('docKind'))}"><b>${esc(L.artifact(a.type))}</b> ${a.payload?.simulated ? `<span class="badge sim">${esc(L.t('simBadge'))}</span>` : ''}${a.payload?.summary ? `<div class="mute">${esc(a.payload.summary)}</div>` : ''}</td><td data-l="${esc(L.t('file'))}">${a.hash && a.payload?.name ? `<button class="ghost sm" data-dl="${esc(a.hash)}" data-name="${esc(a.payload.name)}">${K.ic('download')} ${esc(a.payload.name)}</button>` : '<span class="mute">—</span>'}</td><td data-l="${esc(L.t('addedBy'))}">${esc(K.who(a.createdBy))}<div>${K.time(a.createdAt)}</div></td><td data-l="${esc(L.t('sha'))}">${a.hash ? `<span class="code">${esc(a.hash.slice(0, 12))}…</span>` : ''}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">${K.ic('file')}<p>${esc(L.t('noDocs'))}</p></div>`}</section>
       ${open ? `<section class="card" aria-labelledby="up-h"><h3 id="up-h">${esc(L.t('uploadDoc'))}</h3><form id="upf" class="grid g3"><div class="field"><label for="ut">${esc(L.t('docKind'))}</label><select id="ut" required><option value="">${esc(L.t('pickType'))}</option>${types.map((t) => `<option value="${esc(t)}">${esc(L.artifact(t))}</option>`).join('')}</select></div><div class="field"><span class="lbl" id="ufl">${esc(L.t('file'))}</span><div class="file"><label class="btn secondary" for="uf">${K.ic('upload')} ${esc(L.t('chooseFile'))}</label><input id="uf" type="file" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg" aria-describedby="ufn"><span id="ufn" class="mute">${esc(L.t('noFile'))}</span></div><span class="hint">${esc(L.t('sizeLimit'))}</span></div><div class="field"><span class="lbl">&nbsp;</span><button type="submit">${K.ic('upload')} ${esc(L.t('uploadDoc'))}</button></div></form><p class="mt8"><button class="ghost sm" id="rec">${esc(L.t('addRecord'))}</button></p></section>` : ''}`;
 
@@ -102,7 +104,11 @@
       }
     }
 
-    const panel = { overview, documents: docsTab, notes: notesTab, actions: actionsTab, najiz, history: hist }[tab] ?? overview;
+    const fileSec = (h, inner) => `<section class="card file-sec"><h3>${esc(h)}</h3>${inner}</section>`;
+    const fileView = `<div class="print-bar"><button id="doPrint">${K.ic('file')} ${esc(L.t('printFile'))}</button></div>
+      <div class="print-only"><p><b>${esc(L.t('printTitle'))}</b> · <span class="code">${esc(c.id)}</span></p><p>${esc(L.t('confNote'))} · ${esc(L.t('printedOn'))} ${K.dateTime(new Date().toISOString())} ${esc(L.t('printedBy'))} ${esc(me.name)}</p></div>
+      ${overview}${actionsTab}${fileSec(L.t('tabNotes'), notes.length ? notesList : `<p class="mute">${esc(L.t('noNotes'))}</p>`)}${docsTab}${hist}`;
+    const panel = { overview, documents: docsTab, notes: notesTab, file: fileView, actions: actionsTab, najiz, history: hist }[tab] ?? overview;
     const html = head + `<div id="panel" role="tabpanel" aria-labelledby="tab-${tab}" tabindex="0">${panel}</div>`;
 
     const after = (root) => {
@@ -110,6 +116,7 @@
       const post = async (path, body, okMsg) => { const res = await K.api('POST', path, body); if (K.report(res, okMsg)) await reload(); return res; };
       K.$$('[data-act]', root).forEach((b) => (b.onclick = async () => { const res = await K.api('POST', `${base}/transitions/${b.dataset.act}`); if (K.report(res, L.t('stepDone'))) reload(); }));
       K.$$('[data-appr]', root).forEach((b) => (b.onclick = () => post(`${base}/approvals`, { role: b.dataset.appr }, L.t('approve_ok'))));
+      const dp = K.$('#doPrint', root); if (dp) dp.onclick = () => window.print();
       const nf = K.$('#nf', root);
       if (nf) {
         const picked = new Map(); const ta = K.$('#ntext', root), sel = K.$('#nment', root), chips = K.$('#nchips', root);

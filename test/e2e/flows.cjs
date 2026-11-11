@@ -104,6 +104,11 @@ const RAW = /\b[A-Z]{2,}(?:_[A-Z0-9]+)+\b|\b[a-z]+_[a-z_]+\b/; // an untranslate
   p = await open('a-hr-intake', 'en'); await p.goto(BASE + '/#/'); await p.waitForSelector('#bell .bell-n'); ok(true, 'mentioned person sees unread bell');
   await p.click('#bell'); await p.waitForSelector('.notifs li.unread'); ok(await p.locator('.notifs li', { hasText: 'mentioned you' }).count() >= 1, 'inbox shows the mention');
   await p.click('#markall'); await p.waitForSelector('.notifs li:not(.unread)'); ok(await p.locator('#bell .bell-n').count() === 0 || true, 'mark all read');
+  console.log('Home trends, CSV export, printable file');
+  p = await open('a-hr-mgr', 'en'); await p.goto(BASE + '/#/'); await p.waitForSelector('#t-h'); ok(await p.locator('table.trend tbody tr').count() === 8, 'home shows 8-week trend');
+  ok(await p.locator('.stat').count() <= 5, 'home shows no more than five tiles');
+  await p.goto(BASE + '/#/cases'); await p.waitForSelector('#exportCsv'); const [dl2] = await Promise.all([p.waitForEvent("download"), p.click("#exportCsv")]); ok(/csv$/.test(dl2.suggestedFilename()), 'case list exports as CSV');
+  await p.goto(BASE + `/#/cases/${id}/file`); await p.waitForSelector('#doPrint'); ok(await p.locator('.file-sec').count() >= 1 && await p.locator('#doPrint').count() === 1, 'printable case file page');
   console.log('Clearing a field, people & access, phone layout');
   p = await open('a-hr-mgr', 'en');
   await p.goto(BASE + `/#/cases/${id}`); await p.waitForSelector('#edit');

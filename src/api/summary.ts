@@ -87,13 +87,43 @@ export function search(cases: CaseState[], user: Principal, defs: Record<string,
   return { total: rows.length, page, pageSize, items: rows.slice((page - 1) * pageSize, page * pageSize) };
 }
 
+/** Higher = more urgent: past its target date, then close to it, then overdue actions. */
+const urgency = (s: CaseSummary): number => (s.slaStatus === 'BREACHED' ? 4 : 0) + (s.slaStatus === 'AT_RISK' ? 2 : 0) + (s.overdueActions > 0 ? 1 : 0);
+
+const WEEK = 7 * 86400000;
+/** Weekly opened/closed counts for the last 8 weeks plus headline ageing figures. Built from summaries only. */
+export function trendsOf(rows: CaseSummary[], nowIso: string) {
+  const now = Date.parse(nowIso);
+  const weeks = Array.from({ length: 8 }, (_, i) => { const end = now - (7 - i) * WEEK + WEEK; return { start: new Date(end - WEEK).toISOString().slice(0, 10), opened: 0, closed: 0, _s: end - WEEK, _e: end }; });
+  const bucket = (t: number) => weeks.find((w) => t >= w._s && t < w._e);
+  const closedRows = rows.filter((r) => r.stateKind !== 'OPEN');
+  for (const r of rows) { const b = bucket(Date.parse(r.createdAt)); if (b) b.opened++; }
+  for (const r of closedRows) { const b = bucket(Date.parse(r.stateEnteredAt)); if (b) b.closed++; }
+  const open = rows.filter((r) => r.stateKind === 'OPEN');
+  const avg = (xs: number[]) => (xs.length ? Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 10) / 10 : null);
+  return {
+    weeks: weeks.map(({ start, opened, closed }) => ({ start, opened, closed })),
+    avgOpenAgeDays: avg(open.map((r) => r.ageDays)),
+    avgDaysToClose: avg(closedRows.map((r) => Math.max(0, (Date.parse(r.stateEnteredAt) - Date.parse(r.createdAt)) / 86400000))),
+    slaBreached: open.filter((r) => r.slaStatus === 'BREACHED').length, slaAtRisk: open.filter((r) => r.slaStatus === 'AT_RISK').length,
+  };
+}
+
+/** CSV of case summaries. Cells that a spreadsheet could read as a formula are neutralised. */
+export function toCsv(items: CaseSummary[]): string {
+  const cell = (v: unknown) => { let t = v === null || v === undefined ? '' : String(v); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return /[",\n\r]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  const head = ['id', 'type', 'department', 'state', 'title', 'confidentiality', 'assignee', 'created', 'in_state_since', 'age_days', 'open_actions', 'overdue_actions', 'next_due', 'target_date', 'target_status', 'legal_hold'];
+  const rows = items.map((r) => [r.id, r.caseTypeKey, r.department, r.state, r.title, r.confidentiality, r.assigneeId, r.createdAt, r.stateEnteredAt, r.ageDays, r.openActions, r.overdueActions, r.nextDue, r.slaDueAt, r.slaStatus, r.legalHold]);
+  return '\uFEFF' + [head, ...rows].map((r) => r.map(cell).join(',')).join('\r\n') + '\r\n';
+}
+
 export function dashboard(cases: CaseState[], user: Principal, defs: Record<string, CaseTypeDefinition>, nowIso: string) {
   const mine = cases.filter((c) => canAccess(user, c, 'read').allowed && defs[c.caseTypeKey]);
   const rows = mine.map((c) => ({ c, s: summarise(c, user, defs[c.caseTypeKey]!, nowIso) }));
   const open = rows.filter((r) => r.s.stateKind === 'OPEN');
   const tally = (f: (r: (typeof rows)[number]) => string) => { const m: Record<string, number> = {}; for (const r of open) m[f(r)] = (m[f(r)] ?? 0) + 1; return Object.entries(m).map(([key, count]) => ({ key, count })).sort((a, b) => b.count - a.count); };
   const queue = open.map((r) => ({ r, why: needsMe(r.c, user, defs[r.c.caseTypeKey]!) })).filter((x) => x.why.length)
-    .sort((a, b) => b.r.s.ageDays - a.r.s.ageDays).slice(0, 12).map((x) => ({ ...x.r.s, why: x.why }));
+    .sort((a, b) => urgency(b.r.s) - urgency(a.r.s) || b.r.s.ageDays - a.r.s.ageDays).slice(0, 12).map((x) => ({ ...x.r.s, why: x.why }));
   const actions: { caseId: string; caseTitle: string | null; actionId: string; description: string; ownerId: string | null; dueDate: string; overdue: boolean }[] = [];
   for (const { c, s } of open) for (const a of c.actions) {
     if (a.status !== 'OPEN' || !a.dueDate) continue;
@@ -105,7 +135,7 @@ export function dashboard(cases: CaseState[], user: Principal, defs: Record<stri
     counts: { open: open.length, closed: rows.length - open.length, onHold: open.filter((r) => r.s.legalHold).length, needsMe: queue.length, overdue: actions.filter((a) => a.overdue).length, dueSoon: actions.filter((a) => !a.overdue).length },
     byState: tally((r) => `${r.s.caseTypeKey}|${r.s.state}`).map((x) => { const [caseTypeKey, state] = x.key.split('|'); return { caseTypeKey, state, count: x.count }; }),
     byDept: tally((r) => r.s.department),
-    queue, actions: actions.slice(0, 15),
+    queue, actions: actions.slice(0, 15), trends: trendsOf(rows.map((r) => r.s), nowIso),
     recent: [...rows].sort((a, b) => b.s.stateEnteredAt.localeCompare(a.s.stateEnteredAt)).slice(0, 6).map((r) => r.s),
   };
 }

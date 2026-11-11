@@ -30,7 +30,7 @@
     const allStates = [...new Map(Object.values(K.s.defs).flatMap((d) => d.states.map((s) => [s.key, s]))).values()];
     const sel = (id, label, opts, cur) => `<div class="field"><label for="${id}">${esc(label)}</label><select id="${id}"><option value="">${esc(L.t('all'))}</option>${opts.map(([v, t]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>`;
     const chk = (id, label, on) => `<label class="row gap6"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}> ${esc(label)}</label>`;
-    const html = `<div class="page-h"><h2 id="h">${esc(L.t('cases'))}</h2><span class="spacer"></span><button class="gold" id="new">${K.ic('plus')} ${esc(L.t('newCase'))}</button></div>
+    const html = `<div class="page-h"><h2 id="h">${esc(L.t('cases'))}</h2><span class="spacer"></span><button class="secondary" id="exportCsv" type="button">${K.ic('download')} ${esc(L.t('exportCsv'))}</button><button class="gold" id="new">${K.ic('plus')} ${esc(L.t('newCase'))}</button></div>
     <section class="card"><div class="field"><label class="sr-only" for="q">${esc(L.t('search'))}</label><div class="input-icon">${K.ic('search')}<input id="q" type="search" value="${esc(state.q)}" placeholder="${esc(L.t('searchPh'))}" autocomplete="off"></div></div>
     <details class="filters mt8" ${['state', 'dept', 'type', 'mine', 'open', 'needs', 'overdue', 'due'].some((k) => state[k]) ? 'open' : ''}><summary>${K.ic('filter')} ${esc(L.t('filterTitle'))}${['state', 'dept', 'type', 'mine', 'open', 'needs', 'overdue', 'due'].filter((k) => state[k]).length ? ` <span class="badge">${K.num(['state', 'dept', 'type', 'mine', 'open', 'needs', 'overdue', 'due'].filter((k) => state[k]).length)}</span>` : ''}</summary><form id="f" role="search" class="grid g3">
       ${sel('fstate', L.t('filterState'), allStates.map((s) => [s.key, L.lab(s.label)]), state.state)}
@@ -58,6 +58,7 @@
         K.$('#views', root).innerHTML = v.map((x, i) => `<span class="chip"><a href="#/cases?${esc(x.qs)}">${esc(x.name)}</a><button type="button" data-dv="${i}" aria-label="${esc(L.t('deleteView'))}: ${esc(x.name)}">${K.ic('x')}</button></span>`).join('') || `<span class="mute">${esc(L.t('none'))}</span>`;
         K.$$('[data-dv]', root).forEach((b) => (b.onclick = () => { const a = readViews(); a.splice(Number(b.dataset.dv), 1); K.ls.set(viewsKey(), JSON.stringify(a)); views(); }));
       };
+      K.$('#exportCsv', root).onclick = async () => { const p = params(); p.delete('pageSize'); p.delete('page'); const res = await fetch('/cases/export.csv?' + p, { headers: { authorization: Auth.header(K.s.user) } }); if (!res.ok) return K.toast(L.t('e_' + res.status), 'err'); const url = URL.createObjectURL(await res.blob()); const a = document.createElement('a'); a.href = url; a.download = 'cases.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1500); };
       let seq = 0;
       const load = async () => {
         const my = ++seq; const box = K.$('#results', root); box.parentElement.setAttribute('aria-busy', 'true');
