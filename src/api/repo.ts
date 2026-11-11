@@ -26,7 +26,17 @@ export interface Tx {
   getAudit(caseId: string): Promise<AuditEvent[]>;
 }
 
-export interface Person { id: string; name: string; kind: string; tenantId: string; departments: string[]; roles: string[]; reportsTo: string[]; lastSeen: string }
+export interface Person {
+  id: string; name: string; kind: string; tenantId: string; departments: string[]; roles: string[]; reportsTo: string[]; lastSeen: string;
+  clearance?: 'STANDARD' | 'RESTRICTED' | 'PRIVILEGED'; email?: string | null; emailOptout?: boolean; counselMatterIds?: string[];
+}
+
+export type NotificationKind = 'ASSIGNED' | 'MENTIONED' | 'STATE_CHANGED' | 'SLA_RISK' | 'SLA_BREACH' | 'ACTION_DUE';
+/** Says that something happened on a case, never what is inside it. */
+export interface Notification {
+  id: string; tenantId: string; userId: string; kind: NotificationKind; caseId: string; actorId?: string | null;
+  dedupeKey?: string | null; createdAt: string; readAt?: string | null; emailedAt?: string | null;
+}
 
 export interface Repo extends KeyStore, RevocationStore {
   /** Runs fn in a transaction bound to one tenant; row-level security applies in Postgres. */
@@ -47,6 +57,14 @@ export interface Repo extends KeyStore, RevocationStore {
   listAiLog(tenantId: string, limit: number): Promise<AiLogEntry[]>;
   verifyChain(events: AuditEvent[]): ReturnType<typeof verifyChain>;
   touchPerson(p: Person): Promise<void>;
+  setEmailOptout(tenantId: string, userId: string, optout: boolean): Promise<void>;
+  /** Adds a notification; a repeated dedupeKey for the same person is ignored. Returns whether it was new. */
+  addNotification(n: Notification): Promise<boolean>;
+  listNotifications(tenantId: string, userId: string, opts: { unreadOnly?: boolean; limit?: number }): Promise<Notification[]>;
+  countUnread(tenantId: string, userId: string): Promise<number>;
+  markRead(tenantId: string, userId: string, ids: string[] | 'all', at: string): Promise<void>;
+  pendingEmails(tenantId: string, limit: number): Promise<{ n: Notification; person: Person }[]>;
+  markEmailed(tenantId: string, ids: string[], at: string): Promise<void>;
   listPeople(tenantId: string): Promise<Person[]>;
   /** Every tenant that has data (for background jobs). */
   listTenants(): Promise<string[]>;
@@ -66,7 +84,22 @@ export class MemoryRepo implements Repo {
   async loadRevocations() { return { ...this.revoked }; }
   async setRevocation(s: string, nb: number) { this.revoked[s] = Math.max(nb, this.revoked[s] ?? 0); }
   private people = new Map<string, Person>();
-  async touchPerson(p: Person) { this.people.set(`${p.tenantId}|${p.id}`, p); }
+  private notes: Notification[] = [];
+  async setEmailOptout(t: string, u: string, o: boolean) { const p = this.people.get(`${t}|${u}`); if (p) p.emailOptout = o; }
+  async addNotification(n: Notification) {
+    if (n.dedupeKey && this.notes.some((x) => x.tenantId === n.tenantId && x.userId === n.userId && x.dedupeKey === n.dedupeKey)) return false;
+    this.notes.push({ ...n }); return true;
+  }
+  async listNotifications(t: string, u: string, o: { unreadOnly?: boolean; limit?: number }) {
+    return this.notes.filter((n) => n.tenantId === t && n.userId === u && (!o.unreadOnly || !n.readAt)).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, o.limit ?? 50);
+  }
+  async countUnread(t: string, u: string) { return this.notes.filter((n) => n.tenantId === t && n.userId === u && !n.readAt).length; }
+  async markRead(t: string, u: string, ids: string[] | 'all', at: string) { for (const n of this.notes) if (n.tenantId === t && n.userId === u && !n.readAt && (ids === 'all' || ids.includes(n.id))) n.readAt = at; }
+  async pendingEmails(t: string, limit: number) {
+    return this.notes.filter((n) => n.tenantId === t && !n.emailedAt).slice(0, limit).flatMap((n) => { const p = this.people.get(`${t}|${n.userId}`); return p ? [{ n, person: p }] : []; });
+  }
+  async markEmailed(t: string, ids: string[], at: string) { for (const n of this.notes) if (n.tenantId === t && ids.includes(n.id)) n.emailedAt = at; }
+  async touchPerson(p: Person) { const k = `${p.tenantId}|${p.id}`; this.people.set(k, { ...p, emailOptout: this.people.get(k)?.emailOptout ?? false }); }
   async listPeople(t: string) { return [...this.people.values()].filter((p) => p.tenantId === t).sort((a, b) => a.name.localeCompare(b.name)); }
   private locks = new Set<string>();
   async listTenants() { return [...new Set([...this.cases.values()].map((c) => c.tenantId))].sort(); }

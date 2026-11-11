@@ -23,7 +23,7 @@ window.CMS = window.CMS || {};
     user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>', chevL: '<path d="M15 6l-6 6 6 6"/>', chevR: '<path d="M9 6l6 6-6 6"/>', globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/>',
     shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>', inbox: '<path d="M3 13l3-8h12l3 8v6H3z"/><path d="M3 13h5l1 3h6l1-3h5"/>', list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
     gavel: '<path d="M14 4l6 6-3 3-6-6zM9 9l-6 6 3 3 6-6M12 18h9"/>', hist: '<path d="M3 12a9 9 0 109-9 9 9 0 00-7 3.5L3 9"/><path d="M3 4v5h5M12 8v4l3 2"/>', info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.01"/>',
-    sort: '<path d="M8 4v16M4 16l4 4 4-4M16 20V4M12 8l4-4 4 4"/>', filter: '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>', send: '<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
+    sort: '<path d="M8 4v16M4 16l4 4 4-4M16 20V4M12 8l4-4 4 4"/>', filter: '<path d="M3 5h18l-7 8v6l-4 2v-8z"/>', bell: '<path d="M6 17V11a6 6 0 0112 0v6l2 2H4z"/><path d="M10 21h4"/>', note: '<path d="M4 4h16v12H8l-4 4z"/><path d="M8 9h8M8 12h5"/>', send: '<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
   };
   K.ic = (n, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true" focusable="false">${P[n] ?? ''}</svg>`;
 

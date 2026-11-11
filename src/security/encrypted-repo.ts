@@ -82,6 +82,13 @@ export class EncryptedRepo implements Repo {
   setRevocation: Repo['setRevocation'] = (s, n) => this.inner.setRevocation(s, n);
   touchPerson: Repo['touchPerson'] = (p) => this.inner.touchPerson(p);
   listPeople: Repo['listPeople'] = (t) => this.inner.listPeople(t);
+  setEmailOptout: Repo['setEmailOptout'] = (t, u, o) => this.inner.setEmailOptout(t, u, o);
+  addNotification: Repo['addNotification'] = (n) => this.inner.addNotification(n);
+  listNotifications: Repo['listNotifications'] = (t, u, o) => this.inner.listNotifications(t, u, o);
+  countUnread: Repo['countUnread'] = (t, u) => this.inner.countUnread(t, u);
+  markRead: Repo['markRead'] = (t, u, i, a) => this.inner.markRead(t, u, i, a);
+  pendingEmails: Repo['pendingEmails'] = (t, l) => this.inner.pendingEmails(t, l);
+  markEmailed: Repo['markEmailed'] = (t, i, a) => this.inner.markEmailed(t, i, a);
   listTenants: Repo['listTenants'] = () => this.inner.listTenants();
   withLock: Repo['withLock'] = (n, f) => this.inner.withLock(n, f);
   close = () => this.inner.close?.() ?? Promise.resolve();

@@ -23,6 +23,8 @@ import type { AiProviders, ChatProvider, InKingdomProvider } from '../ai';
 import { dashboard as buildDashboard, search as searchCases } from './summary';
 import { NajizError } from '../najiz/types';
 import { syncCase } from '../najiz/sync';
+import { makeNotifier, personToActor } from './notify';
+import { summarise } from './summary';
 import type { NajizRegistry } from '../najiz/types';
 import { NajizRuleError, approverOf, currentApprovals, assertMaySubmit, importUpdates, najizState, pendingArtifact, planPacket, reconcile, resolution } from '../najiz/workflow';
 
@@ -75,19 +77,20 @@ const STATIC = new Set(['/', '/index.html', '/auth.js', '/style.css', '/favicon.
 export function createApp(deps: AppDeps) {
   const { repo, directory, paidOcr } = deps;
   // Remember who has signed in (names for the UI, assignable people, management chain). At most every 10 minutes per person.
+  const notifier = makeNotifier(repo, () => now());
   const touched = new Map<string, number>();
   const touchPerson = async (u: Principal) => {
     if (u.tenantId === 'platform' || (u.kind !== 'human' && u.kind !== 'external')) return;
     const k = `${u.tenantId}|${u.id}`; const n = Date.now();
     if ((touched.get(k) ?? 0) > n - 600_000) return;
     touched.set(k, n);
-    try { await repo.touchPerson({ id: u.id, name: u.name, kind: u.kind, tenantId: u.tenantId, departments: u.departments, roles: u.roles, reportsTo: u.reportsTo, lastSeen: new Date().toISOString() }); }
+    try { await repo.touchPerson({ id: u.id, name: u.name, kind: u.kind, tenantId: u.tenantId, departments: u.departments, roles: u.roles, reportsTo: u.reportsTo, lastSeen: new Date().toISOString(), clearance: u.clearance, email: u.email ?? null, ...(u.counselMatterIds ? { counselMatterIds: u.counselMatterIds } : {}) }); }
     catch (e) { touched.delete(k); console.error('touchPerson failed', (e as Error).message); }
   };
   const peopleOf = async (tenantId: string) => {
     const m = new Map((await repo.listPeople(tenantId)).map((p) => [p.id, p]));
     for (const u of directory.all?.() ?? []) if (u.tenantId === tenantId && !m.has(u.id) && (u.kind === 'human' || u.kind === 'external'))
-      m.set(u.id, { id: u.id, name: u.name, kind: u.kind, tenantId, departments: u.departments, roles: u.roles, reportsTo: u.reportsTo, lastSeen: '' });
+      m.set(u.id, { id: u.id, name: u.name, kind: u.kind, tenantId, departments: u.departments, roles: u.roles, reportsTo: u.reportsTo, lastSeen: '', clearance: u.clearance, email: u.email ?? null, ...(u.counselMatterIds ? { counselMatterIds: u.counselMatterIds } : {}) });
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
   };
   const providers: AiProviders = { ...(deps.provider ? { sovereign: deps.provider } : {}), ...(deps.inKingdom ? { inKingdom: deps.inKingdom } : {}) };
@@ -277,6 +280,10 @@ export function createApp(deps: AppDeps) {
       await tx.saveCase(m.case, m.event);
       return m.case;
     });
+    if (out?.assignee) {
+      const a = (await peopleOf(user.tenantId)).find((x) => x.id === out.assignee!.id);
+      await notifier.notify(out, [a], 'STATE_CHANGED', user.id).catch((e) => console.error('notify failed', (e as Error).message));
+    }
     return out ? c.json(view(out, user)) : nf(c);
   });
 
@@ -294,7 +301,58 @@ export function createApp(deps: AppDeps) {
       return out ? c.json(view(out, user)) : nf(c);
     };
   app.patch('/cases/:id/fields', mutate((cs, u, b) => setFields(cs, b, u, now(), CASE_TYPES[cs.caseTypeKey]!)));
-  app.post('/cases/:id/artifacts', mutate((cs, u, b) => addArtifact(cs, b, u, now())));
+  app.post('/cases/:id/artifacts', mutate((cs, u, b) => {
+    if (b?.type === 'note') throw new FieldError('VALIDATION', [{ field: 'type', code: 'USE_NOTES_ENDPOINT' }]); // notes have their own validated route
+    return addArtifact(cs, b, u, now());
+  }));
+  // ---- Notes: a discussion on the case. Stored as append-only, timestamped, encrypted case records, visible to everyone who can see the case.
+  app.post('/cases/:id/notes', async (c) => {
+    const user = c.get('user');
+    const b = await c.req.json<{ text?: unknown; mentions?: unknown }>().catch(() => ({} as { text?: unknown; mentions?: unknown }));
+    const text = typeof b.text === 'string' ? b.text.trim() : '';
+    const mentions = Array.isArray(b.mentions) ? [...new Set(b.mentions.filter((x): x is string => typeof x === 'string'))] : [];
+    if (!text || text.length > 5000 || mentions.length > 20) return c.json({ error: 'INVALID_FIELDS' }, 400);
+    const people = await peopleOf(user.tenantId);
+    const known = mentions.map((id) => people.find((p) => p.id === id)).filter((p): p is NonNullable<typeof p> => Boolean(p));
+    const noteId = `note-${crypto.randomUUID().slice(0, 12)}`;
+    const out = await repo.tx(user, async (tx) => {
+      const cs = await load(tx, c.req.param('id'), user, 'write', true);
+      if (!cs) return undefined;
+      const m = addArtifact(cs, { id: noteId, type: 'note', payload: { text, mentions: known.map((p) => p.id) } }, user, now());
+      await tx.saveCase(m.case, m.event);
+      return m.case;
+    });
+    if (!out) return nf(c);
+    // Only people who may read this case are told; the author learns who could not be reached (so nothing is silently dropped).
+    const reachable = known.filter((p) => canAccess(personToActor(p), out, 'read').allowed);
+    await notifier.notify(out, reachable, 'MENTIONED', user.id).catch((e) => console.error('notify failed', (e as Error).message));
+    return c.json({ case: view(out, user), noteId, notReached: known.filter((p) => !reachable.includes(p)).map((p) => p.id) }, 201);
+  });
+
+  // ---- Notifications (own only). A notification names an event on a case; it holds no case content.
+  app.get('/notifications', async (c) => {
+    const user = c.get('user'); if (user.tenantId === 'platform') return c.json({ items: [], unread: 0 });
+    const unreadOnly = c.req.query('unread') === '1';
+    const items = await repo.listNotifications(user.tenantId, user.id, { unreadOnly, limit: 50 });
+    const cases = new Map<string, any>();
+    await repo.tx(user, async (tx) => { for (const id of new Set(items.map((n) => n.caseId))) { const cs = await tx.getCase(id); if (cs && canAccess(user, cs, 'read').allowed) cases.set(id, summarise(cs, user, CASE_TYPES[cs.caseTypeKey]!, now())); } });
+    return c.json({ unread: await repo.countUnread(user.tenantId, user.id), items: items.map((n) => ({ id: n.id, kind: n.kind, caseId: n.caseId, actorId: n.actorId ?? null, createdAt: n.createdAt, read: Boolean(n.readAt), case: cases.get(n.caseId) ?? null })) });
+  });
+  app.get('/notifications/count', async (c) => { const u = c.get('user'); return c.json({ unread: u.tenantId === 'platform' ? 0 : await repo.countUnread(u.tenantId, u.id) }); });
+  app.post('/notifications/read', async (c) => {
+    const u = c.get('user'); const b = await c.req.json<{ ids?: unknown; all?: unknown }>().catch(() => ({} as { ids?: unknown; all?: unknown }));
+    const ids = b.all === true ? 'all' as const : Array.isArray(b.ids) ? b.ids.filter((x): x is string => typeof x === 'string').slice(0, 200) : [];
+    if (ids === 'all' || ids.length) await repo.markRead(u.tenantId, u.id, ids, now());
+    return c.json({ unread: await repo.countUnread(u.tenantId, u.id) });
+  });
+  app.get('/notifications/settings', async (c) => { const u = c.get('user'); const me = (await peopleOf(u.tenantId)).find((p) => p.id === u.id); return c.json({ emailOptout: Boolean(me?.emailOptout), hasEmail: Boolean(u.email) }); });
+  app.put('/notifications/settings', async (c) => {
+    const u = c.get('user'); const b = await c.req.json<{ emailOptout?: unknown }>().catch(() => ({} as { emailOptout?: unknown }));
+    if (typeof b.emailOptout !== 'boolean') return c.json({ error: 'INVALID_FIELDS' }, 400);
+    await touchPerson(u); await repo.setEmailOptout(u.tenantId, u.id, b.emailOptout);
+    return c.json({ emailOptout: b.emailOptout });
+  });
+
   // The assignee is looked up server-side: the management chain used for conflict-of-interest checks must not come from the request.
   app.post('/cases/:id/assignee', async (c) => {
     const user = c.get('user');
@@ -308,6 +366,7 @@ export function createApp(deps: AppDeps) {
       await tx.saveCase(m.case, m.event);
       return m.case;
     });
+    if (out) await notifier.notify(out, [p], 'ASSIGNED', user.id).catch((e) => console.error('notify failed', (e as Error).message));
     return out ? c.json(view(out, user)) : nf(c);
   });
   app.post('/cases/:id/actions', mutate((cs, u, b) => addAction(cs, b, u, now())));

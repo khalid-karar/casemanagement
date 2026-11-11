@@ -2,6 +2,8 @@ import type { Actor } from '../engine';
 
 export interface Principal extends Actor {
   name: string;
+  /** From the identity provider; used only for e-mail notifications. */
+  email?: string;
   /** Legal-library roles live alongside case roles. */
 }
 

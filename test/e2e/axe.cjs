@@ -15,7 +15,7 @@ const BASE = process.env.BASE_URL || 'http://localhost:3000';
     }
     await ctx.close();
   };
-  const hr = [['/', '.stat'], ['/cases', '#results table, #results .empty'], ['/cases/HR-2026-001', '.stepper'], ['/cases/HR-2026-001/documents', '#upf'], ['/cases/HR-2026-001/actions', '#aaf'], ['/cases/HR-2026-001/history', '.timeline'], ['/laws', '#lawlist'], ['/ai', '#al']];
+  const hr = [['/', '.stat'], ['/cases', '#results table, #results .empty'], ['/cases/HR-2026-001', '.stepper'], ['/cases/HR-2026-001/notes', '#nf'], ['/inbox', '.page-h'], ['/cases/HR-2026-001/documents', '#upf'], ['/cases/HR-2026-001/actions', '#aaf'], ['/cases/HR-2026-001/history', '.timeline'], ['/laws', '#lawlist'], ['/ai', '#al']];
   for (const lang of ['ar', 'en']) {
     await run('a-hr-mgr', lang, hr); await run('a-counsel', lang, [['/cases/m-1/najiz', '#panel .card']]); await run('p-verifier', lang, [['/review', '.card']]); await run('a-admin', lang, [['/people', 'table.tbl']]);
   }

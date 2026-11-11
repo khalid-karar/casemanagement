@@ -115,13 +115,14 @@ describe('sealed identity is not readable back from any write route', () => {
     const responses = [
       await call(app, 'a-hr-mgr', 'PATCH', '/cases/HR-1/fields', {}),
       await call(app, 'a-hr-mgr', 'POST', '/cases/HR-1/transitions/triage'),
-      await call(app, 'a-hr-mgr', 'POST', '/cases/HR-1/artifacts', { id: 'z', type: 'note' }),
+      await call(app, 'a-hr-mgr', 'POST', '/cases/HR-1/artifacts', { id: 'z', type: 'evidence' }),
+      await call(app, 'a-hr-mgr', 'POST', '/cases/HR-1/notes', { text: 'a note' }),
       await call(app, 'a-hr-mgr', 'POST', '/cases/HR-1/actions', { id: 'act1', description: 'd' }),
       await call(app, 'a-hr-mgr', 'POST', '/cases', { id: 'HR-9', caseType: 'hr.misconduct', fields: { allegationSummary: 'y', reporterIdentity: 'emp-5' }, parties: [{ personId: 'emp-5', role: 'REPORTER', reportsTo: [], sealed: true }] }),
     ];
     for (const r of responses) {
       expect([200, 201, 409]).toContain(r.status);
-      if (r.status !== 409) expect(sealedSeen(await json(r))).toBe(false);
+      if (r.status !== 409) { const body = await json(r); expect(sealedSeen(body.case ?? body)).toBe(false); }
     }
   });
   it('still shows the identity to the ethics officer on a write response', async () => {

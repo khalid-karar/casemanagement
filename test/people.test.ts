@@ -43,7 +43,7 @@ describe.skipIf(!PG_ENABLED)('people on Postgres', () => {
     await freshDatabase(); const r = await newRepo();
     const p = { id: 'u1', name: 'Sara', kind: 'human', tenantId: 't1', departments: ['HR'], roles: ['hr_manager'], reportsTo: ['b1'], lastSeen: 'a' };
     await r.touchPerson(p); await r.touchPerson({ ...p, name: 'Sara A', lastSeen: 'b' });
-    expect(await r.listPeople('t1')).toEqual([{ ...p, name: 'Sara A', lastSeen: 'b' }]);
+    expect(await r.listPeople('t1')).toMatchObject([{ ...p, name: 'Sara A', lastSeen: 'b' }]);
     expect(await r.listPeople('t2')).toEqual([]);
     await r.close?.();
   });

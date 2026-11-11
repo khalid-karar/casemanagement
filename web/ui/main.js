@@ -8,7 +8,7 @@
     const query = new URLSearchParams(q);
     if (!seg.length) return { name: 'home', params: [], query };
     if (seg[0] === 'cases' && seg[1]) return { name: 'case', params: [seg[1], seg[2]], query };
-    return { name: ['cases', 'laws', 'ai', 'review', 'people'].includes(seg[0]) ? seg[0] : 'home', params: [], query };
+    return { name: ['cases', 'laws', 'ai', 'review', 'people', 'inbox'].includes(seg[0]) ? seg[0] : 'home', params: [], query };
   };
   K.go = (path) => { if (('#' + path) === location.hash) K.render(); else location.hash = path; };
   const isBack = () => K.s.me?.tenantId === 'platform';
@@ -57,6 +57,7 @@
       const rt = K.$('#retry'); if (rt) rt.onclick = () => K.render(); document.title = L.t('app'); return;
     }
     if (my !== seq) return;
+    if (K.bell) K.bell();
     view.innerHTML = out.html; document.title = `${out.title} · ${L.t('app')}`;
     out.after?.(view);
     if (keepScroll) window.scrollTo(0, y); else { window.scrollTo(0, 0); const h = K.$('#h'); if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); } }

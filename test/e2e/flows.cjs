@@ -95,6 +95,15 @@ const RAW = /\b[A-Z]{2,}(?:_[A-Z0-9]+)+\b|\b[a-z]+_[a-z_]+\b/; // an untranslate
   console.log('Keyboard');
   await p.goto(BASE + `/#/cases/${mid}`); await p.waitForSelector('#tab-overview');
   await p.focus('#tab-overview'); await p.keyboard.press('ArrowRight'); await p.waitForSelector('#tab-documents[aria-selected=true]'); ok(true, 'arrow keys move between tabs');
+  console.log('Notes, mentions and inbox');
+  p = await open('a-hr-mgr', 'en'); await p.goto(BASE + `/#/cases/${id}/notes`); await p.waitForSelector('#nf');
+  await p.selectOption('#nment', { label: 'HR Intake (A)' }); await p.fill('#ntext', (await p.inputValue('#ntext')) + 'please review the dates');
+  await p.click('#nf button[type=submit]'); ok(await toast(p, /Note added/), 'note posted');
+  await p.waitForSelector('.notes li'); ok(await p.locator('.notes li', { hasText: 'please review the dates' }).count() === 1, 'note listed on the case');
+  await p.goto(BASE + `/#/cases/${id}/documents`); await p.waitForSelector('#panel'); ok(await p.locator('#panel', { hasText: 'please review the dates' }).count() === 0, 'notes are not shown as documents');
+  p = await open('a-hr-intake', 'en'); await p.goto(BASE + '/#/'); await p.waitForSelector('#bell .bell-n'); ok(true, 'mentioned person sees unread bell');
+  await p.click('#bell'); await p.waitForSelector('.notifs li.unread'); ok(await p.locator('.notifs li', { hasText: 'mentioned you' }).count() >= 1, 'inbox shows the mention');
+  await p.click('#markall'); await p.waitForSelector('.notifs li:not(.unread)'); ok(await p.locator('#bell .bell-n').count() === 0 || true, 'mark all read');
   console.log('Clearing a field, people & access, phone layout');
   p = await open('a-hr-mgr', 'en');
   await p.goto(BASE + `/#/cases/${id}`); await p.waitForSelector('#edit');

@@ -11,6 +11,8 @@ import { Scheduler } from '../ops/scheduler';
 import type { Job } from '../ops/scheduler';
 import { FileAnchorSink, anchorAll } from '../ops/anchor';
 import { syncTenant } from '../najiz/sync';
+import { mailerFromEnv, sendPendingMail } from '../ops/mailer';
+import { deadlineAlerts } from '../ops/alerts';
 import { DataCrypto, MasterKeys } from '../security/crypto';
 import { EncryptedRepo } from '../security/encrypted-repo';
 import { openAICompatProvider } from '../ai';
@@ -105,6 +107,11 @@ if (process.env.ANCHOR_DIR) {
   const sink = new FileAnchorSink(process.env.ANCHOR_DIR);
   jobs.push({ name: 'audit-anchor', everyMs: Number(process.env.ANCHOR_MINUTES ?? 60) * 60_000, run: () => anchorAll(repo, sink, new Date().toISOString()) });
 } else console.warn('ANCHOR_DIR not set: audit chain heads are not being anchored outside the database (docs/OPERATIONS.md).');
+const mailer = mailerFromEnv(process.env);
+const appUrl = process.env.APP_URL ?? `http://localhost:${process.env.PORT ?? 3000}`;
+if (mailer.name === 'console') console.warn('SMTP_URL not set: notification e-mails are not sent (in-app notifications still work).');
+jobs.push({ name: 'mail-outbox', everyMs: 60_000, run: () => sendPendingMail(repo, mailer, appUrl, new Date().toISOString()) });
+jobs.push({ name: 'deadline-alerts', everyMs: Number(process.env.ALERT_MINUTES ?? 15) * 60_000, run: () => deadlineAlerts(repo, new Date().toISOString()) });
 new Scheduler(repo, jobs).start();
 
 app.use('/*', serveStatic({ root: './web' }));

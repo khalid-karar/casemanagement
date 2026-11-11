@@ -64,6 +64,7 @@ export function principalFromClaims(c: JWTPayload & Record<string, any>): Princi
   return {
     id: c.sub,
     name: first(c.name) ?? first(c.preferred_username) ?? c.sub,
+    ...(typeof c.email === 'string' && c.email_verified !== false && c.email.length < 255 && /^[^\s@]+@[^\s@]+$/.test(c.email) ? { email: c.email } : {}),
     kind,
     tenantId,
     departments: strArr(c.departments).filter((d): d is (typeof DEPARTMENTS)[number] => (DEPARTMENTS as readonly string[]).includes(d)),

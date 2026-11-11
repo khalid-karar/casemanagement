@@ -5,7 +5,7 @@ import { LegalLibrary } from '../legal';
 import type { Instrument, InstrumentVersion, RuleBinding } from '../legal';
 import type { Proposal } from '../legal';
 import { tenantOf } from './repo';
-import type { AiLogEntry, CaseDocument, Person, Repo, Scope, Tx } from './repo';
+import type { AiLogEntry, CaseDocument, Notification, Person, Repo, Scope, Tx } from './repo';
 import type { AiSettings } from '../ai/consent';
 import { defaultSettings } from '../ai/consent';
 
@@ -150,15 +150,44 @@ export class PgRepo implements Repo {
   }
 
   touchPerson(p: Person) {
-    return this.run(p.tenantId, async (c) => { await c.query(`INSERT INTO tenant_people (tenant_id,id,name,kind,departments,roles,reports_to,last_seen) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-      ON CONFLICT (tenant_id,id) DO UPDATE SET name=EXCLUDED.name, kind=EXCLUDED.kind, departments=EXCLUDED.departments, roles=EXCLUDED.roles, reports_to=EXCLUDED.reports_to, last_seen=EXCLUDED.last_seen`,
-      [p.tenantId, p.id, p.name, p.kind, p.departments.join(','), p.roles.join(','), p.reportsTo.join(','), p.lastSeen]); });
+    return this.run(p.tenantId, async (c) => { await c.query(`INSERT INTO tenant_people (tenant_id,id,name,kind,departments,roles,reports_to,last_seen,clearance,email,matters) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      ON CONFLICT (tenant_id,id) DO UPDATE SET name=EXCLUDED.name, kind=EXCLUDED.kind, departments=EXCLUDED.departments, roles=EXCLUDED.roles, reports_to=EXCLUDED.reports_to, last_seen=EXCLUDED.last_seen, clearance=EXCLUDED.clearance, email=EXCLUDED.email, matters=EXCLUDED.matters`,
+      [p.tenantId, p.id, p.name, p.kind, p.departments.join(','), p.roles.join(','), p.reportsTo.join(','), p.lastSeen, p.clearance ?? 'STANDARD', p.email ?? null, (p.counselMatterIds ?? []).join(',')]); });
   }
-  listPeople(tenantId: string) {
+  private toPerson = (r: any): Person => {
     const split = (s: string) => (s ? s.split(',') : []);
-    return this.run(tenantId, async (c) => (await c.query('SELECT * FROM tenant_people WHERE tenant_id=$1 ORDER BY name', [tenantId])).rows
-      .map((r): Person => ({ id: r.id, name: r.name, kind: r.kind, tenantId: r.tenant_id, departments: split(r.departments), roles: split(r.roles), reportsTo: split(r.reports_to), lastSeen: r.last_seen })));
+    return { id: r.id, name: r.name, kind: r.kind, tenantId: r.tenant_id, departments: split(r.departments), roles: split(r.roles), reportsTo: split(r.reports_to), lastSeen: r.last_seen,
+      clearance: r.clearance, email: r.email, emailOptout: r.email_optout, counselMatterIds: split(r.matters) };
+  };
+  listPeople(tenantId: string) {
+    return this.run(tenantId, async (c) => (await c.query('SELECT * FROM tenant_people WHERE tenant_id=$1 ORDER BY name', [tenantId])).rows.map(this.toPerson));
   }
+  setEmailOptout(tenantId: string, userId: string, optout: boolean) {
+    return this.run(tenantId, async (c) => { await c.query('UPDATE tenant_people SET email_optout=$3 WHERE tenant_id=$1 AND id=$2', [tenantId, userId, optout]); });
+  }
+  private toNote = (r: any): Notification => ({ id: r.id, tenantId: r.tenant_id, userId: r.user_id, kind: r.kind, caseId: r.case_id, actorId: r.actor_id, dedupeKey: r.dedupe_key, createdAt: r.created_at, readAt: r.read_at, emailedAt: r.emailed_at });
+  addNotification(n: Notification) {
+    return this.run(n.tenantId, async (c) => (await c.query('INSERT INTO notifications (tenant_id,id,user_id,kind,case_id,actor_id,dedupe_key,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT DO NOTHING',
+      [n.tenantId, n.id, n.userId, n.kind, n.caseId, n.actorId ?? null, n.dedupeKey ?? null, n.createdAt])).rowCount === 1);
+  }
+  listNotifications(t: string, u: string, o: { unreadOnly?: boolean; limit?: number }) {
+    return this.run(t, async (c) => (await c.query(`SELECT * FROM notifications WHERE tenant_id=$1 AND user_id=$2 ${o.unreadOnly ? 'AND read_at IS NULL' : ''} ORDER BY created_at DESC LIMIT $3`, [t, u, o.limit ?? 50])).rows.map(this.toNote));
+  }
+  countUnread(t: string, u: string) {
+    return this.run(t, async (c) => Number((await c.query('SELECT count(*) n FROM notifications WHERE tenant_id=$1 AND user_id=$2 AND read_at IS NULL', [t, u])).rows[0].n));
+  }
+  markRead(t: string, u: string, ids: string[] | 'all', at: string) {
+    return this.run(t, async (c) => { await c.query(`UPDATE notifications SET read_at=$3 WHERE tenant_id=$1 AND user_id=$2 AND read_at IS NULL ${ids === 'all' ? '' : 'AND id = ANY($4)'}`, ids === 'all' ? [t, u, at] : [t, u, at, ids]); });
+  }
+  pendingEmails(t: string, limit: number) {
+    return this.run(t, async (c) => (await c.query(`SELECT n.id n_id, n.user_id, n.kind, n.case_id, n.actor_id, n.dedupe_key, n.created_at n_created, n.read_at, n.emailed_at, p.*
+      FROM notifications n JOIN tenant_people p ON p.tenant_id=n.tenant_id AND p.id=n.user_id WHERE n.tenant_id=$1 AND n.emailed_at IS NULL ORDER BY n.created_at LIMIT $2`, [t, limit])).rows
+      .map((r) => ({ n: { id: r.n_id, tenantId: t, userId: r.user_id, kind: r.kind, caseId: r.case_id, actorId: r.actor_id, dedupeKey: r.dedupe_key, createdAt: r.n_created, readAt: r.read_at, emailedAt: r.emailed_at } as Notification, person: this.toPerson(r) })));
+  }
+  markEmailed(t: string, ids: string[], at: string) {
+    return this.run(t, async (c) => { await c.query('UPDATE notifications SET emailed_at=$3 WHERE tenant_id=$1 AND id = ANY($2)', [t, ids, at]); });
+  }
+
   async listTenants() { return (await this.pool.query('SELECT tenant_id FROM tenant_registry ORDER BY 1')).rows.map((r) => r.tenant_id as string); }
   async withLock(name: string, fn: () => Promise<void>) {
     const c = await this.pool.connect();

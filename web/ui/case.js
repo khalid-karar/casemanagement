@@ -1,7 +1,7 @@
 // Case workspace: overview (steps, approvals, details), documents, corrective actions, najiz, history.
 (() => {
   const K = CMS, { esc } = K;
-  const TABS = (def) => [['overview', 'tabOverview', 'info'], ['documents', 'tabDocuments', 'file'], ['actions', 'tabActions', 'check'], ...(def.domain === 'LEGAL' ? [['najiz', 'tabNajiz', 'gavel']] : []), ['history', 'tabTimeline', 'hist']];
+  const TABS = (def) => [['overview', 'tabOverview', 'info'], ['documents', 'tabDocuments', 'file'], ['notes', 'tabNotes', 'note'], ['actions', 'tabActions', 'check'], ...(def.domain === 'LEGAL' ? [['najiz', 'tabNajiz', 'gavel']] : []), ['history', 'tabTimeline', 'hist']];
   const sizeOk = 25 * 1024 * 1024;
 
   CMS.views.case = async (route) => {
@@ -60,7 +60,15 @@
 
     // ---- Documents ----------------------------------------------------------------------------
     const types = def.artifactTypes ?? [];
-    const docs = c.artifacts.filter((a) => !a.type.startsWith('najiz_status'));
+    const docs = c.artifacts.filter((a) => !a.type.startsWith('najiz_status') && a.type !== 'note');
+    const notes = c.artifacts.filter((a) => a.type === 'note').sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    const canNote = c.access?.canNote !== false;
+    const others = (K.s.people || []).filter((p) => p.id !== me.id);
+    const notesTab = `<section class="card" aria-labelledby="nt-h"><div class="card-h">${K.ic('note')}<h3 id="nt-h">${esc(L.t('tabNotes'))}</h3></div>
+      <form id="nf" class="stack-f"><label for="ntext">${esc(L.t('noteAdd'))}</label><textarea id="ntext" rows="3" maxlength="5000" placeholder="${esc(L.t('notePh'))}" required></textarea>
+      <div class="row"><label class="sr-only" for="nment">${esc(L.t('mentions'))}</label><select id="nment"><option value="">@ ${esc(L.t('mentions'))}…</option>${others.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select><span id="nchips" class="chips"></span><span class="spacer"></span><button type="submit">${K.ic('send')} ${esc(L.t('notePost'))}</button></div>
+      <p class="mute">${esc(L.t('mentionHint'))}</p></form>
+      ${notes.length ? `<ul class="notes">${notes.map((n) => `<li><div class="note-h"><b>${esc(K.who(n.createdBy))}</b> ${K.time(n.createdAt)}</div><p class="note-t">${esc(n.payload?.text ?? '')}</p>${(n.payload?.mentions || []).length ? `<div class="mute">${(n.payload.mentions).map((m) => `<span class="chip-s">@${esc(K.who(m))}</span>`).join(' ')}</div>` : ''}</li>`).join('')}</ul>` : `<div class="empty">${K.ic('note')}<p>${esc(L.t('noNotes'))}</p></div>`}</section>`;
     const docsTab = `<section class="card"><div class="card-h">${K.ic('file')}<h3>${esc(L.t('docs'))}</h3></div>${docs.length ? `<table class="tbl stack"><thead><tr><th scope="col">${esc(L.t('docKind'))}</th><th scope="col">${esc(L.t('file'))}</th><th scope="col">${esc(L.t('addedBy'))}</th><th scope="col">${esc(L.t('sha'))}</th></tr></thead><tbody>${docs.map((a) => `<tr><td data-l="${esc(L.t('docKind'))}"><b>${esc(L.artifact(a.type))}</b> ${a.payload?.simulated ? `<span class="badge sim">${esc(L.t('simBadge'))}</span>` : ''}${a.payload?.summary ? `<div class="mute">${esc(a.payload.summary)}</div>` : ''}</td><td data-l="${esc(L.t('file'))}">${a.hash && a.payload?.name ? `<button class="ghost sm" data-dl="${esc(a.hash)}" data-name="${esc(a.payload.name)}">${K.ic('download')} ${esc(a.payload.name)}</button>` : '<span class="mute">—</span>'}</td><td data-l="${esc(L.t('addedBy'))}">${esc(K.who(a.createdBy))}<div>${K.time(a.createdAt)}</div></td><td data-l="${esc(L.t('sha'))}">${a.hash ? `<span class="code">${esc(a.hash.slice(0, 12))}…</span>` : ''}</td></tr>`).join('')}</tbody></table>` : `<div class="empty">${K.ic('file')}<p>${esc(L.t('noDocs'))}</p></div>`}</section>
       ${open ? `<section class="card" aria-labelledby="up-h"><h3 id="up-h">${esc(L.t('uploadDoc'))}</h3><form id="upf" class="grid g3"><div class="field"><label for="ut">${esc(L.t('docKind'))}</label><select id="ut" required><option value="">${esc(L.t('pickType'))}</option>${types.map((t) => `<option value="${esc(t)}">${esc(L.artifact(t))}</option>`).join('')}</select></div><div class="field"><span class="lbl" id="ufl">${esc(L.t('file'))}</span><div class="file"><label class="btn secondary" for="uf">${K.ic('upload')} ${esc(L.t('chooseFile'))}</label><input id="uf" type="file" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg" aria-describedby="ufn"><span id="ufn" class="mute">${esc(L.t('noFile'))}</span></div><span class="hint">${esc(L.t('sizeLimit'))}</span></div><div class="field"><span class="lbl">&nbsp;</span><button type="submit">${K.ic('upload')} ${esc(L.t('uploadDoc'))}</button></div></form><p class="mt8"><button class="ghost sm" id="rec">${esc(L.t('addRecord'))}</button></p></section>` : ''}`;
 
@@ -94,7 +102,7 @@
       }
     }
 
-    const panel = { overview, documents: docsTab, actions: actionsTab, najiz, history: hist }[tab] ?? overview;
+    const panel = { overview, documents: docsTab, notes: notesTab, actions: actionsTab, najiz, history: hist }[tab] ?? overview;
     const html = head + `<div id="panel" role="tabpanel" aria-labelledby="tab-${tab}" tabindex="0">${panel}</div>`;
 
     const after = (root) => {
@@ -102,6 +110,13 @@
       const post = async (path, body, okMsg) => { const res = await K.api('POST', path, body); if (K.report(res, okMsg)) await reload(); return res; };
       K.$$('[data-act]', root).forEach((b) => (b.onclick = async () => { const res = await K.api('POST', `${base}/transitions/${b.dataset.act}`); if (K.report(res, L.t('stepDone'))) reload(); }));
       K.$$('[data-appr]', root).forEach((b) => (b.onclick = () => post(`${base}/approvals`, { role: b.dataset.appr }, L.t('approve_ok'))));
+      const nf = K.$('#nf', root);
+      if (nf) {
+        const picked = new Map(); const ta = K.$('#ntext', root), sel = K.$('#nment', root), chips = K.$('#nchips', root);
+        const paint = () => { chips.innerHTML = [...picked].map(([i, n]) => `<button type="button" class="chip-s" data-un="${esc(i)}" aria-label="${esc(L.t('cancel'))} ${esc(n)}">@${esc(n)} ×</button>`).join(' '); K.$$('[data-un]', chips).forEach((b) => (b.onclick = () => { picked.delete(b.dataset.un); paint(); })); };
+        sel.onchange = () => { if (!sel.value) return; const o = sel.selectedOptions[0]; picked.set(sel.value, o.textContent); if (!ta.value.includes('@' + o.textContent)) ta.value = (ta.value + ' @' + o.textContent + ' ').trimStart(); sel.value = ''; paint(); ta.focus(); };
+        nf.onsubmit = async (e) => { e.preventDefault(); const text = ta.value.trim(); if (!text) return; const mentions = [...picked.keys()].filter((i) => text.includes('@' + picked.get(i))); const res = await K.api('POST', `${base}/notes`, { text, mentions }); if (K.report(res, L.t('noteSaved'))) { const nr = res.j?.notReached || []; if (nr.length) K.toast(`${L.t('notReached')}: ${nr.map((i) => K.who(i)).join('، ')}`, 'warn'); reload(); } };
+      }
       const am = K.$('#assignMe', root); if (am) am.onclick = () => post(`${base}/assignee`, { id: me.id }, L.t('saved'));
       const ag = K.$('#asel', root); if (ag) ag.onchange = () => { const v = ag.value.trim(); if (v) post(`${base}/assignee`, { id: v }, L.t('assignedNow')); };
       const hold = K.$('#hold', root); if (hold) hold.onclick = async () => { const r2 = await K.dialog({ title: c.legalHold ? L.t('holdRelease') : L.t('holdPlace'), ok: L.t('ok'), body: `<div class="field"><label for="hr">${esc(L.t('holdReason'))}</label><input id="hr" name="reason" required maxlength="300" autofocus></div>` }); if (!r2.ok) return; const res = await K.api(c.legalHold ? 'DELETE' : 'POST', `${base}/legal-hold`, { reason: r2.data.reason }); if (K.report(res)) reload(); };
