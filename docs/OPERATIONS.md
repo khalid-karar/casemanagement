@@ -31,3 +31,14 @@ Purge is **off**. No retention period is configured or enforced until counsel se
 Roles are assigned in Keycloak. Tenant admins have a **People & access** screen (`#/people`): everyone who has signed in, their departments and roles, last sign-in, and an *End sessions* button (immediate revocation, own organisation only). The list is built from sign-ins (table `tenant_people`), so a person appears after their first sign-in.
 
 Assignment safety: when a case is assigned, the server looks the assignee up in this list and uses the management chain from the identity provider (`reports_to` claim). The browser can no longer supply it, so a conflict of interest cannot be hidden by a crafted request. Parties who are known people get their chain from the same list.
+
+## Notifications and e-mail
+- In-app notifications are content-free (event kind, case id, actor) and reach only people who may read the case. Users can opt out of e-mail in the inbox.
+- E-mail: set `SMTP_URL` and `MAIL_FROM`. Without them a console mailer is used (nothing leaves the server). Jobs `mail-outbox` and `deadline-alerts` run on the scheduler under advisory locks.
+- E-mail is bilingual and content-free: it says something happened and links to the case.
+
+## Branding
+`web/brand.js` holds the placeholder brand (`name`, `mark`, `logoUrl`). The product name and logo are the owner's decision; edit that one file per deployment. Logo files must be same-origin (CSP).
+
+## Exports and printing
+`GET /cases/export.csv` takes the list filters, returns summaries only (no sealed or personal values), at most 5,000 rows, with spreadsheet-formula cells neutralised. The printable case file is `#/cases/<id>/file` (browser Print / Save as PDF).

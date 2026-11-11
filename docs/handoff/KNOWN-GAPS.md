@@ -40,3 +40,11 @@ Each has an automated test (`test/qa-matrix.test.ts`, `test/roles.test.ts`, `tes
 - **The seeded law text is placeholder wording** marked `[نص تجريبي للاختبار فقط]`, not the gazetted text. Testing against real laws is an open item and is part of this pack (QA-TEST-PLAN §D).
 - **The QA realm and `docker-compose.qa.yml` were generated and checked for structure, but not booted in the build environment.** Expect to fix a setup detail on first boot (hostname, TLS, redirect URI) and tell us what it was.
 - AI output is always a draft and is never legal advice; that banner is intended.
+
+## K. Round 4 (notes, notifications, reports, intake)
+- Keyboard-shortcut and tour wording, and the placeholder brand name and logo, need the owner's decision.
+- Intake form is for staff recording a report received from someone else; a self-service employee portal needs a role decision (employees currently have no create right).
+- Related-case links are one-directional records shown from both sides; removing a link is not supported (append-only by design).
+- Mentions use a picker, not as-you-type suggestions.
+- CSV export is not itself audited per download.
+- Hotline operators, SOC 2 / ISO 27001 certification and HRIS connectors are out of scope for the code.

@@ -21,3 +21,6 @@ Najiz filing is built and tested against a simulator (`docs/NAJIZ.md`); the real
 
 ## Sign-in
 Run locally with `pnpm start:dev` (demo user switcher, `AUTH_MODE=dev`). Real deployments use Keycloak (`AUTH_MODE=oidc`); see docs/KEYCLOAK.md. The server refuses to start without an explicit mode, and refuses dev mode in production.
+
+## UI features added
+Notes with @mentions, notifications (in-app and e-mail), queue-first home with trends, CSV export, printable case file, related cases, bulk assign/export, confidential report intake, person case history, keyboard shortcuts, first-visit tour, configurable brand (`web/brand.js`).

@@ -212,3 +212,15 @@ Already listed in KNOWN-GAPS? (which id):
 ```
 
 **Severity.** *Critical*: data crosses a tenant or privilege wall, a sealed identity is exposed, or authentication is bypassed. *High*: a workflow rule or approval can be bypassed, or a department wall is crossed. *Medium*: wrong behaviour without exposure. *Low*: cosmetic, wording. Anything that exposes a sealed reporter or privileged material is Critical even if it needs unusual steps.
+
+## Added in this round (please test)
+- Notes and @mentions: mention someone without access to the case; the author is told they were not notified. Notes never appear under Documents.
+- Inbox and bell: unread count, mark all read, e-mail opt-out; a person never sees a notification for a case they cannot read.
+- Home: queue ranked past-target, then at-risk, then overdue actions; zero-value tiles hidden; 8-week opened/closed trend; per-department card hidden for single-department users.
+- CSV export (list filters) and "export selected"; open the file in Excel with Arabic text and with a title starting `=`.
+- Print case file (`#/cases/<id>/file`): navigation and buttons hidden in print preview.
+- Related cases: link to a case you cannot read (must fail), see the link from both sides, restricted targets show no id.
+- Person history (`#/person/<id>`): sealed parties never appear.
+- Bulk assign: includes a case where the chosen assignee has a conflict of interest (must be reported as failed).
+- Confidential report intake (`#/report`): anonymous option stores no reporter name; audit log still shows who entered it.
+- Shortcuts `/`, `g h`, `g c`, `g i`, `n`, `?`; first-visit tour (once per person per browser).
