@@ -21,6 +21,13 @@ export function validateCaseType(def: CaseTypeDefinition): string[] {
     if (fieldByKey.has(f.key)) issues.push(`duplicate field "${f.key}"`);
     fieldByKey.set(f.key, f);
     if (f.type === 'enum' && (!f.options || f.options.length === 0)) issues.push(`enum field "${f.key}" has no options`);
+    // A misspelled state here is a silent bug: the field would simply never freeze.
+    for (const s of f.lockedIn ?? []) {
+      if (!stateKeys.has(s)) issues.push(`field "${f.key}" is lockedIn unknown state "${s}"`);
+    }
+    if (f.lockedFrom !== undefined && !stateKeys.has(f.lockedFrom)) {
+      issues.push(`field "${f.key}" is lockedFrom unknown state "${f.lockedFrom}"`);
+    }
   }
 
   if (!stateKeys.has(def.initialState)) issues.push(`initialState "${def.initialState}" is not a defined state`);

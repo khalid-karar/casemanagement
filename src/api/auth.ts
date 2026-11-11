@@ -2,6 +2,8 @@ import type { Actor } from '../engine';
 
 export interface Principal extends Actor {
   name: string;
+  /** From the identity provider; used only for e-mail notifications. */
+  email?: string;
   /** Legal-library roles live alongside case roles. */
 }
 
@@ -13,6 +15,7 @@ export interface Principal extends Actor {
 export class Directory {
   private users = new Map<string, Principal>();
   add(p: Principal) { this.users.set(p.id, p); }
+  all(): Principal[] { return [...this.users.values()]; }
   resolve(header: string | undefined): Principal | undefined {
     const m = /^Bearer dev:(.+)$/.exec(header ?? '');
     return m ? this.users.get(m[1]!) : undefined;

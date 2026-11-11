@@ -13,13 +13,18 @@ export const auditFinding = defineCaseType({
   defaultConfidentiality: 'RESTRICTED',
   fields: [
     { key: 'title', label: { en: 'Title', ar: 'العنوان' }, type: 'text', required: true },
-    { key: 'engagementRef', label: { en: 'Engagement reference', ar: 'مرجع المهمة' }, type: 'text' },
-    { key: 'condition', label: { en: 'Condition (what was found)', ar: 'الحالة (ما تم رصده)' }, type: 'longtext' },
-    { key: 'criteria', label: { en: 'Criteria (what should be)', ar: 'المعيار (ما يجب أن يكون)' }, type: 'longtext' },
-    { key: 'cause', label: { en: 'Cause', ar: 'السبب' }, type: 'longtext' },
-    { key: 'effect', label: { en: 'Effect', ar: 'الأثر' }, type: 'longtext' },
-    { key: 'riskRating', label: { en: 'Risk rating', ar: 'تقييم المخاطر' }, type: 'enum', options: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] },
-    { key: 'fraudIndicators', label: { en: 'Fraud indicators present', ar: 'وجود مؤشرات احتيال' }, type: 'boolean' },
+    { key: 'engagementRef', label: { en: 'Engagement reference', ar: 'مرجع المهمة' }, type: 'text', lockedFrom: 'RATED' },
+    // Management responds to a stated finding. If the finding itself could still be reworded after the
+    // response arrives, the response would no longer be a response to what was actually written.
+    { key: 'condition', label: { en: 'Condition (what was found)', ar: 'الحالة (ما تم رصده)' }, type: 'longtext', lockedFrom: 'AWAITING_RESPONSE' },
+    { key: 'criteria', label: { en: 'Criteria (what should be)', ar: 'المعيار (ما يجب أن يكون)' }, type: 'longtext', lockedFrom: 'AWAITING_RESPONSE' },
+    { key: 'cause', label: { en: 'Cause', ar: 'السبب' }, type: 'longtext', lockedFrom: 'AWAITING_RESPONSE' },
+    { key: 'effect', label: { en: 'Effect', ar: 'الأثر' }, type: 'longtext', lockedFrom: 'AWAITING_RESPONSE' },
+    // Independence: management responds TO a rating. A rating that can be lowered after the response
+    // lands is the classic audit-independence failure, and it empties the IIA trail of meaning.
+    { key: 'riskRating', label: { en: 'Risk rating', ar: 'تقييم المخاطر' }, type: 'enum', options: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'], lockedFrom: 'AWAITING_RESPONSE' },
+    // Clearing this after the finding is rated would read as suppression.
+    { key: 'fraudIndicators', label: { en: 'Fraud indicators present', ar: 'وجود مؤشرات احتيال' }, type: 'boolean', lockedFrom: 'RATED' },
   ],
   states: [
     { key: 'DRAFT', label: { en: 'Draft', ar: 'مسودة' } },

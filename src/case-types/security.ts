@@ -14,13 +14,18 @@ export const securityIncident = defineCaseType({
       label: { en: 'Incident type', ar: 'نوع الحادثة' },
       type: 'enum',
       options: ['THEFT', 'ACCESS_VIOLATION', 'ASSAULT', 'VANDALISM', 'INSIDER_THREAT', 'SAFETY_BREACH', 'OTHER'],
+      lockedFrom: 'INVESTIGATING',
     },
-    { key: 'location', label: { en: 'Location', ar: 'الموقع' }, type: 'text' },
-    { key: 'occurredAt', label: { en: 'Occurred on', ar: 'تاريخ الحدوث' }, type: 'date' },
-    { key: 'severity', label: { en: 'Severity', ar: 'الخطورة' }, type: 'enum', options: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] },
+    // The incident facts are what the evidence was collected against. Editing them after collection
+    // breaks the chain-of-custody narrative that ISO 27037 and the Law of Evidence (M/43) rest on.
+    { key: 'location', label: { en: 'Location', ar: 'الموقع' }, type: 'text', lockedFrom: 'INVESTIGATING' },
+    { key: 'occurredAt', label: { en: 'Occurred on', ar: 'تاريخ الحدوث' }, type: 'date', lockedFrom: 'INVESTIGATING' },
+    // Drives referral thresholds and the SLA, so it is fixed once findings are issued.
+    { key: 'severity', label: { en: 'Severity', ar: 'الخطورة' }, type: 'enum', options: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'], lockedFrom: 'FINDINGS_ISSUED' },
+    // Deliberately NOT locked: loss figures are legitimately revised as an assessment firms up.
     { key: 'estimatedLossSar', label: { en: 'Estimated loss (SAR)', ar: 'الخسارة التقديرية (ريال)' }, type: 'money' },
     { key: 'personsInvolved', label: { en: 'Persons involved', ar: 'الأشخاص المعنيون' }, type: 'person', sensitivity: 'PERSONAL' },
-    { key: 'outcome', label: { en: 'Outcome', ar: 'النتيجة' }, type: 'enum', options: ['CONFIRMED', 'NOT_CONFIRMED', 'REFERRED'] },
+    { key: 'outcome', label: { en: 'Outcome', ar: 'النتيجة' }, type: 'enum', options: ['CONFIRMED', 'NOT_CONFIRMED', 'REFERRED'], lockedFrom: 'FINDINGS_ISSUED' },
   ],
   states: [
     { key: 'NEW', label: { en: 'New', ar: 'جديدة' } },

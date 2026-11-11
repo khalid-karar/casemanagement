@@ -38,7 +38,7 @@ Without these variables the Postgres tests are skipped and the same API suite ru
 - Backups, point-in-time recovery and retention/purge jobs are operational tasks not yet built.
 
 ## Law file upload: OCR requirements
-The runtime needs `poppler-utils`, `tesseract-ocr` and `tesseract-ocr-ara` (the `Dockerfile` installs them). `/health` reports `"ocr": true|false`; without them, scans and Arabic PDFs are refused with 503.
+The runtime needs `poppler-utils`, `tesseract-ocr` and `tesseract-ocr-ara` (the `Dockerfile` installs them). `/health/details` (platform sign-in) reports `"ocr": true|false`; without them, scans and Arabic PDFs are refused with 503.
 Arabic PDFs are always read by OCR, not from the PDF's text layer, because those layers commonly reverse letters or turn "لا" into "ال". OCR output carries a confidence score and is never trusted without human verification against the original file.
 
 ## Paid OCR (optional, platform national-law uploads only)

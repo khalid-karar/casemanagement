@@ -9,7 +9,7 @@ window.Auth = (() => {
 
   async function init() {
     cfg = await (await fetch('/auth/config')).json();
-    if (cfg.mode !== 'oidc') return;
+    if (cfg.mode !== 'oidc') return;        // dev: cfg.users fills the switcher; /me is fetched per selected user
     const q = new URLSearchParams(location.search);
     if (q.get('code')) {
       const ok = q.get('state') === sessionStorage.getItem('pkce_state');
@@ -33,5 +33,12 @@ window.Auth = (() => {
     await new Promise(() => {}); // navigation in progress
   }
   const logout = () => { token = null; location.href = ep('logout') + '?' + new URLSearchParams({ client_id: cfg.clientId, post_logout_redirect_uri: redirectUri() }); };
-  return { init, logout, get mode() { return cfg.mode; }, get me() { return me; }, header: (devUser) => 'Bearer ' + (cfg.mode === 'oidc' ? token : 'dev:' + devUser) };
+  return {
+    init, logout,
+    get mode() { return cfg.mode; },
+    get me() { return me; },
+    /** Dev mode only: the demo accounts the server will accept, straight from src/api/test-users.ts. */
+    get users() { return cfg.users ?? []; },
+    header: (devUser) => 'Bearer ' + (cfg.mode === 'oidc' ? token : 'dev:' + devUser),
+  };
 })();
