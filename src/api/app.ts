@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import {
   AccessDeniedError, ConflictOfInterestError, FieldError, TransitionBlockedError, addArtifact, addAction, applyTransition,
-  assignCase, canAccess, completeAction, createCase, evaluateTransition, placeLegalHold, recordApproval, redactForActor, releaseLegalHold, setFields,
+  assignCase, canAccess, completeAction, createCase, evaluateTransition, placeLegalHold, recordApproval, redactForActor, releaseLegalHold, setFields, SAUDI_CALENDAR, slaForCase, statutoryClocks,
 } from '../engine';
 import type { Principal } from './auth';
 import { Directory } from './auth';
@@ -261,7 +261,10 @@ export function createApp(deps: AppDeps) {
         const lang = c.get('lang');
         return { action: t.action, label: t.label, allowed: ev.allowed, blockers: ev.blockers.map((b) => ({ code: b.code, message: lang === 'ar' ? b.messageAr ?? b.message : b.message })) };
       });
-    return c.json({ case: view(cs, user), actions });
+    const nowIso = now();
+    const kind = def.states.find((x) => x.key === cs.state)?.kind ?? 'OPEN';
+    const deadlines = { sla: kind === 'OPEN' ? slaForCase(def, cs, SAUDI_CALENDAR, nowIso) : null, clocks: statutoryClocks(def, cs, SAUDI_CALENDAR, nowIso) };
+    return c.json({ case: view(cs, user), actions, deadlines });
   });
 
   app.post('/cases/:id/transitions/:action', async (c) => {

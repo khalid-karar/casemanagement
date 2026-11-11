@@ -17,6 +17,7 @@ window.CMS = window.CMS || {};
     home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>', folder: '<path d="M3 6a2 2 0 012-2h4l2 3h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>',
     scale: '<path d="M12 3v18M6 21h12M5 7h14"/><path d="M5 7l-3 7a3 3 0 006 0zM19 7l-3 7a3 3 0 006 0z"/>', spark: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8z"/>',
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>', plus: '<path d="M12 5v14M5 12h14"/>', check: '<path d="M5 12l5 5 9-10"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>',
+    cog: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>', alert: '<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.01"/>', file: '<path d="M6 3h8l5 5v13H6z"/><path d="M14 3v5h5"/>',
     upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 20h16"/>', download: '<path d="M12 4v12M7 11l5 5 5-5"/><path d="M4 20h16"/>', lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>',
     user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>', chevL: '<path d="M15 6l-6 6 6 6"/>', chevR: '<path d="M9 6l6 6-6 6"/>', globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/>',
@@ -80,9 +81,12 @@ window.CMS = window.CMS || {};
     if (!valid(iso)) return '';
     const secs = (Date.parse(iso) - Date.now()) / 1000; const abs = Math.abs(secs);
     const rtf = new Intl.RelativeTimeFormat(loc(), { numeric: 'auto' });
+    if (abs < 45) return rtf.format(0, 'second');
     const [v, u] = abs < 3600 ? [Math.round(secs / 60), 'minute'] : abs < 86400 ? [Math.round(secs / 3600), 'hour'] : abs < 86400 * 30 ? [Math.round(secs / 86400), 'day'] : [Math.round(secs / 86400 / 30), 'month'];
     return rtf.format(v, u);
   };
+  /** Age in days for lists: "Today" instead of "0 d". */
+  K.age = (n) => (n < 1 ? L.t('today') : `${K.num(n)} ${L.t('daysShort')}`);
   K.time = (iso) => (valid(iso) ? `<time datetime="${K.esc(iso)}" title="${K.esc(K.dateTime(iso))}">${K.esc(K.rel(iso))}</time>` : '');
   K.daysUntil = (ymd) => Math.floor((Date.parse(ymd + 'T00:00:00+03:00') - Date.now()) / 86400000);
 })();

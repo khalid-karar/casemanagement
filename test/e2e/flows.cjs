@@ -55,7 +55,7 @@ const RAW = /\b[A-Z]{2,}(?:_[A-Z0-9]+)+\b|\b[a-z]+_[a-z_]+\b/; // an untranslate
   await p.fill('#q', 'zzz-nothing'); await p.waitForTimeout(600);
   ok(await p.locator('#results .empty', { hasText: 'No matching cases' }).count() === 1, 'empty state for no results');
   await p.click('#clr2'); await p.waitForSelector('#results table');
-  await p.check('#fneeds'); await p.waitForTimeout(500); ok(await p.locator('#chips .chip').count() === 1, 'active filter chip');
+  await p.click('details.filters summary'); await p.check('#fneeds'); await p.waitForTimeout(500); ok(await p.locator('#chips .chip').count() === 1, 'active filter chip');
   await p.click('#saveView'); await p.fill('#vn', 'Mine'); await p.click('#dlg-ok'); ok(await toast(p, /View saved/), 'view saved');
   await p.reload(); await p.waitForSelector('#views .chip a:has-text("Mine")'); ok(true, 'saved view survives reload');
   await p.click('#views .chip a'); await p.waitForTimeout(500);

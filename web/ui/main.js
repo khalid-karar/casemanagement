@@ -21,6 +21,7 @@
     K.$('#appTitle').textContent = L.t('app');
     K.$('#nav').innerHTML = navItems().map(([href, lbl, ic, name]) => `<li><a href="#${href}" ${route.name === name || (route.name === 'case' && name === 'cases') ? 'aria-current="page"' : ''}>${K.ic(ic)} ${esc(L.t(lbl))}</a></li>`).join('');
     K.$('#navWrap').setAttribute('aria-label', L.t('navMain'));
+    K.$('#prefsSum').innerHTML = `${K.ic('cog')}<span class="sr-only">${esc(L.t('prefs'))}</span>`; K.$('#prefsSum').title = L.t('prefs');
     const lb = K.$('#langBtn'); lb.textContent = L.t('langSwitch'); lb.lang = K.ar() ? 'en' : 'ar';
     const db = K.$('#digitsBtn'); db.textContent = K.s.digits === 'arab' ? L.t('digitsLatn') : L.t('digitsArab'); db.setAttribute('aria-label', `${L.t('digits')}: ${db.textContent}`);
     const who = K.$('#who');
@@ -62,7 +63,7 @@
   };
 
   window.addEventListener('hashchange', () => K.render());
-  K.$('#langBtn').onclick = () => { K.s.lang = K.ar() ? 'en' : 'ar'; K.ls.set('lang', K.s.lang); K.render({ keepScroll: true }); };
-  K.$('#digitsBtn').onclick = () => { K.s.digits = K.s.digits === 'arab' ? 'latn' : 'arab'; K.ls.set('digits', K.s.digits); K.render({ keepScroll: true }); };
+  K.$('#langBtn').onclick = () => { K.$('#prefs').open = false; K.s.lang = K.ar() ? 'en' : 'ar'; K.ls.set('lang', K.s.lang); K.render({ keepScroll: true }); };
+  K.$('#digitsBtn').onclick = () => { K.$('#prefs').open = false; K.s.digits = K.s.digits === 'arab' ? 'latn' : 'arab'; K.ls.set('digits', K.s.digits); K.render({ keepScroll: true }); };
   Auth.init().then(() => K.render());
 })();

@@ -13,7 +13,7 @@
     const after = (root) => {
       const draw = (q) => {
         const rows = list.filter((l) => !q || `${l.instrument} ${l.instrumentEn ?? ''} ${l.article} ${l.textAr}`.toLowerCase().includes(q));
-        K.$('#lawlist', root).innerHTML = rows.length ? `<ul class="list">${rows.map((l) => `<li class="row top"><div class="t"><b>${esc(K.ar() ? l.instrument : l.instrumentEn ?? l.instrument)}</b> · ${esc(L.t('article'))} <span class="num">${esc(l.article)}</span><div class="mute">${esc(l.version)} · ${esc(L.t('effective'))} ${K.dateBoth(l.effectiveFrom)}</div><p lang="ar" dir="rtl">${esc(l.textAr)}</p></div></li>`).join('')}</ul>` : `<div class="empty">${K.ic('scale')}<p>${esc(L.t('noLaws'))}</p></div>`;
+        K.$('#lawlist', root).innerHTML = rows.length ? `<ul class="list">${rows.map((l) => `<li class="row top"><div class="t"><b>${esc(K.ar() ? l.instrument : l.instrumentEn ?? l.instrument)}</b> · ${esc(L.t('article'))} <span class="num">${esc(l.article)}</span><div class="mute">${K.ar() || !/[\u0600-\u06FF]/.test(l.version ?? '') ? `${esc(l.version)} · ` : ''}${esc(L.t('effective'))} ${K.dateBoth(l.effectiveFrom)}</div><p lang="ar" dir="rtl">${esc(l.textAr)}</p></div></li>`).join('')}</ul>` : `<div class="empty">${K.ic('scale')}<p>${esc(L.t('noLaws'))}</p></div>`;
       };
       let t; K.$('#ls', root).oninput = (e) => { clearTimeout(t); t = setTimeout(() => draw(e.target.value.trim().toLowerCase()), 150); }; draw('');
     };
@@ -63,7 +63,7 @@
     const html = `<div class="page-h"><h2 id="h">${esc(L.t('aiT'))}</h2></div><section class="card"><div class="banner warn">${K.ic('alert')} <span>${esc(L.t('aiDraft'))}</span></div>
       <p class="mute">${esc(L.t('engine'))}: <b>${esc(label(S.current))}</b></p>
       <div class="field"><label for="q">${esc(L.t('question'))}</label><textarea id="q" rows="3"></textarea></div>
-      <div class="row mt8"><button id="al">${esc(L.t('askLaw'))}</button><button class="secondary" id="ac">${esc(L.t('askCase'))}</button></div><div id="ans" class="mt16" aria-live="polite"></div></section><div id="consent"></div>`;
+      ${S.current ? '' : `<div class="banner info">${K.ic('info')} <span>${esc(L.t('aiOffNote'))}</span></div>`}<div class="row mt8"><button id="al" ${S.current ? '' : 'disabled'}>${esc(L.t('askLaw'))}</button><button class="secondary" id="ac" ${S.current ? '' : 'disabled'}>${esc(L.t('askCase'))}</button></div><div id="ans" class="mt16" aria-live="polite"></div></section><div id="consent"></div>`;
     const after = (root) => {
       const show = (res) => { const a = res.j; if (!res.ok) { K.$('#ans', root).innerHTML = ''; return K.report(res); } K.$('#ans', root).innerHTML = `<pre lang="ar" dir="auto">${esc(a.text ?? a.message)}</pre><div class="mute">${esc(L.t('citations'))}: ${(a.citations || []).map((c) => esc(c.article ? `${c.instrument} ${L.t('article')} ${c.article} (${c.versionLabel})` : c)).join(' · ') || esc(L.t('none'))}${a.engine ? ' · ' + esc(L.t('engine')) + ': ' + esc(a.engine.label) : ''}</div>`; };
       const ask = async (path) => { const q = K.$('#q', root).value.trim(); if (!q) return; K.$('#ans', root).innerHTML = `<div class="skel"></div><div class="skel"></div><span class="sr-only">${esc(L.t('thinking'))}</span>`; show(await K.api('POST', path, { question: q })); };

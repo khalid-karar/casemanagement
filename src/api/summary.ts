@@ -1,4 +1,4 @@
-import { canAccess, evaluateTransition, redactForActor, REDACTED } from '../engine';
+import { canAccess, evaluateTransition, redactForActor, REDACTED, SAUDI_CALENDAR, slaForCase } from '../engine';
 import type { CaseState, CaseTypeDefinition } from '../engine';
 import type { Principal } from './auth';
 
@@ -12,6 +12,8 @@ export interface CaseSummary {
   id: string; caseTypeKey: string; department: string; state: string; stateKind: string; title: string | null; confidentiality: string;
   assigneeId: string | null; createdAt: string; stateEnteredAt: string; ageDays: number; legalHold: boolean;
   openActions: number; overdueActions: number; nextDue: string | null;
+  /** Internal service-level target for the current step (not a legal deadline). */
+  slaDueAt: string | null; slaStatus: string | null;
 }
 
 export function summarise(cs: CaseState, user: Principal, def: CaseTypeDefinition, nowIso: string): CaseSummary {
@@ -21,6 +23,8 @@ export function summarise(cs: CaseState, user: Principal, def: CaseTypeDefinitio
   const title = typeof raw === 'string' && raw !== REDACTED && raw ? (raw.length > 90 ? raw.slice(0, 90) + '…' : raw) : null;
   const now = Date.parse(nowIso);
   const open = v.actions.filter((a) => a.status === 'OPEN');
+  const stateKind = def.states.find((x) => x.key === v.state)?.kind ?? 'OPEN';
+  const sla = stateKind === 'OPEN' ? slaForCase(def, cs, SAUDI_CALENDAR, nowIso) : null;
   const due = open.filter((a) => a.dueDate).map((a) => a.dueDate!).sort();
   return {
     id: v.id, caseTypeKey: v.caseTypeKey, department: v.department, state: v.state,
@@ -28,6 +32,7 @@ export function summarise(cs: CaseState, user: Principal, def: CaseTypeDefinitio
     assigneeId: v.assignee?.id ?? null, createdAt: v.createdAt, stateEnteredAt: v.stateEnteredAt,
     ageDays: Math.max(0, Math.floor((now - Date.parse(v.createdAt)) / 86400000)), legalHold: Boolean(v.legalHold),
     openActions: open.length, overdueActions: open.filter((a) => a.dueDate && Date.parse(a.dueDate) < now).length, nextDue: due[0] ?? null,
+    slaDueAt: sla?.dueAt ?? null, slaStatus: sla?.status ?? null,
   };
 }
 
@@ -35,7 +40,7 @@ export interface SearchQuery { q?: string; state?: string; dept?: string; type?:
 export type Row = CaseSummary & { needsMe?: string[] };
 
 const SORTS: Record<string, (a: Row) => string | number> = {
-  id: (r) => r.id, state: (r) => r.state, dept: (r) => r.department, age: (r) => r.ageDays, updated: (r) => r.stateEnteredAt, created: (r) => r.createdAt, title: (r) => r.title ?? '', due: (r) => r.nextDue ?? '9999',
+  id: (r) => r.id, state: (r) => r.state, dept: (r) => r.department, age: (r) => r.ageDays, updated: (r) => r.stateEnteredAt, created: (r) => r.createdAt, title: (r) => r.title ?? '', due: (r) => r.nextDue ?? '9999', sla: (r) => r.slaDueAt ?? '9999',
 };
 
 /** Why a case is waiting on this person: assigned to them, or a step is ready for them, or an approval is theirs to give. */
