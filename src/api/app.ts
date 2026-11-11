@@ -72,7 +72,7 @@ const T = {
 const pickLang = (q: string | undefined, h: string | undefined): 'ar' | 'en' =>
   q === 'en' || (!q && /^en/i.test(h ?? '')) ? 'en' : 'ar';
 
-const STATIC = new Set(['/', '/index.html', '/auth.js', '/style.css', '/favicon.ico', '/auth/config']);
+const STATIC = new Set(['/', '/index.html', '/auth.js', '/brand.js', '/style.css', '/favicon.ico', '/auth/config']);
 
 export function createApp(deps: AppDeps) {
   const { repo, directory, paidOcr } = deps;
@@ -312,9 +312,61 @@ export function createApp(deps: AppDeps) {
     };
   app.patch('/cases/:id/fields', mutate((cs, u, b) => setFields(cs, b, u, now(), CASE_TYPES[cs.caseTypeKey]!)));
   app.post('/cases/:id/artifacts', mutate((cs, u, b) => {
-    if (b?.type === 'note') throw new FieldError('VALIDATION', [{ field: 'type', code: 'USE_NOTES_ENDPOINT' }]); // notes have their own validated route
+    if (b?.type === 'note' || b?.type === 'link') throw new FieldError('VALIDATION', [{ field: 'type', code: 'USE_NOTES_ENDPOINT' }]); // notes and links have their own validated routes
     return addArtifact(cs, b, u, now());
   }));
+  // ---- Related cases. A link is an append-only record on the source case; the target must be readable by whoever creates it.
+  const RELATIONS = ['RELATED', 'DUPLICATE', 'PARENT', 'CHILD', 'FOLLOW_UP'];
+  app.post('/cases/:id/links', async (c) => {
+    const user = c.get('user');
+    const b = await c.req.json<{ targetId?: unknown; relation?: unknown }>().catch(() => ({} as { targetId?: unknown; relation?: unknown }));
+    if (typeof b.targetId !== 'string' || typeof b.relation !== 'string' || !RELATIONS.includes(b.relation) || b.targetId === c.req.param('id')) return c.json({ error: 'INVALID_FIELDS' }, 400);
+    const targetId = b.targetId, relation = b.relation;
+    const out = await repo.tx(user, async (tx) => {
+      const cs = await load(tx, c.req.param('id'), user, 'write', true);
+      if (!cs) return undefined;
+      const t = await tx.getCase(targetId);
+      if (!t || !canAccess(user, t, 'read').allowed) return null;
+      if (cs.artifacts.some((a) => a.type === 'link' && a.payload?.['caseId'] === targetId && a.payload?.['relation'] === relation)) return cs;
+      const m = addArtifact(cs, { id: `link-${crypto.randomUUID().slice(0, 12)}`, type: 'link', payload: { caseId: targetId, relation } }, user, now());
+      await tx.saveCase(m.case, m.event);
+      return m.case;
+    });
+    if (out === undefined || out === null) return nf(c);
+    return c.json({ case: view(out, user) }, 201);
+  });
+  app.get('/cases/:id/related', async (c) => {
+    const user = c.get('user'); const id = c.req.param('id');
+    const out = await repo.tx(user, async (tx) => {
+      const cs = await load(tx, id, user);
+      if (!cs) return undefined;
+      const all = await tx.listCases();
+      const items: { caseId: string | null; relation: string; direction: 'out' | 'in'; summary: ReturnType<typeof summarise> | null }[] = [];
+      const sum = (x: any) => summarise(x, user, CASE_TYPES[x.caseTypeKey]!, now());
+      for (const a of cs.artifacts.filter((x) => x.type === 'link')) {
+        const t = all.find((x) => x.id === a.payload?.['caseId']);
+        const ok = t && canAccess(user, t, 'read').allowed;
+        items.push({ caseId: ok ? t!.id : null, relation: String(a.payload?.['relation']), direction: 'out', summary: ok ? sum(t) : null });
+      }
+      for (const x of all) {
+        if (x.id === id || !canAccess(user, x, 'read').allowed) continue;
+        for (const a of x.artifacts.filter((y) => y.type === 'link' && y.payload?.['caseId'] === id)) items.push({ caseId: x.id, relation: String(a.payload?.['relation']), direction: 'in', summary: sum(x) });
+      }
+      return items;
+    });
+    if (!out) return nf(c);
+    return c.json({ items: out });
+  });
+  // Everything a person is party to, as far as the viewer may see (sealed parties are removed by redaction).
+  app.get('/persons/:personId/cases', async (c) => {
+    const user = c.get('user'); const pid = c.req.param('personId');
+    const all = await repo.tx(user, (tx) => tx.listCases());
+    const rows = all.filter((x) => canAccess(user, x, 'read').allowed && view(x, user).parties.some((p: any) => p.personId === pid))
+      .map((x) => ({ ...summarise(x, user, CASE_TYPES[x.caseTypeKey]!, now()), partyRole: view(x, user).parties.find((p: any) => p.personId === pid)?.role }));
+    rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return c.json({ personId: pid, items: rows });
+  });
+
   // ---- Notes: a discussion on the case. Stored as append-only, timestamped, encrypted case records, visible to everyone who can see the case.
   app.post('/cases/:id/notes', async (c) => {
     const user = c.get('user');

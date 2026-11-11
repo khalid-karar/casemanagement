@@ -8,21 +8,25 @@
     const query = new URLSearchParams(q);
     if (!seg.length) return { name: 'home', params: [], query };
     if (seg[0] === 'cases' && seg[1]) return { name: 'case', params: [seg[1], seg[2]], query };
-    return { name: ['cases', 'laws', 'ai', 'review', 'people', 'inbox'].includes(seg[0]) ? seg[0] : 'home', params: [], query };
+    if (seg[0] === 'person' && seg[1]) return { name: 'person', params: [decodeURIComponent(seg[1])], query };
+    return { name: ['cases', 'laws', 'ai', 'review', 'people', 'inbox', 'report'].includes(seg[0]) ? seg[0] : 'home', params: [], query };
   };
   K.go = (path) => { if (('#' + path) === location.hash) K.render(); else location.hash = path; };
   const isBack = () => K.s.me?.tenantId === 'platform';
-  const navItems = () => (isBack() ? [['/review', 'navReview', 'scale', 'review'], ['/laws', 'navLaws', 'scale', 'laws']] : [['/', 'navHome', 'home', 'home'], ['/cases', 'navCases', 'folder', 'cases'], ['/laws', 'navLaws', 'scale', 'laws'], ['/ai', 'navAi', 'spark', 'ai'], ...(K.s.me?.roles?.includes('tenant_admin') ? [['/people', 'navPeople', 'user', 'people']] : [])]);
+  const navItems = () => (isBack() ? [['/review', 'navReview', 'scale', 'review'], ['/laws', 'navLaws', 'scale', 'laws']] : [['/', 'navHome', 'home', 'home'], ['/cases', 'navCases', 'folder', 'cases'], ['/laws', 'navLaws', 'scale', 'laws'], ['/ai', 'navAi', 'spark', 'ai'], ['/report', 'navReport', 'shield', 'report'], ...(K.s.me?.roles?.includes('tenant_admin') ? [['/people', 'navPeople', 'user', 'people']] : [])]);
 
   function chrome(route) {
     const doc = document.documentElement;
     doc.lang = K.s.lang; doc.dir = K.ar() ? 'rtl' : 'ltr';
     K.$('#skip').textContent = L.t('skip');
-    K.$('#appTitle').textContent = L.t('app');
+    const br = K.brand || {}; const title = br.name?.[K.s.lang] || L.t('app');
+    K.$('#appTitle').textContent = title; K.appName = title;
+    const lg = K.$('.logo'); if (lg) { if (br.logoUrl) lg.innerHTML = `<img src="${esc(br.logoUrl)}" alt="">`; else lg.textContent = br.mark || 'ق'; }
     K.$('#nav').innerHTML = navItems().map(([href, lbl, ic, name]) => `<li><a href="#${href}" ${route.name === name || (route.name === 'case' && name === 'cases') ? 'aria-current="page"' : ''}>${K.ic(ic)} ${esc(L.t(lbl))}</a></li>`).join('');
     K.$('#navWrap').setAttribute('aria-label', L.t('navMain'));
     K.$('#prefsSum').innerHTML = `${K.ic('cog')}<span class="sr-only">${esc(L.t('prefs'))}</span>`; K.$('#prefsSum').title = L.t('prefs');
     const lb = K.$('#langBtn'); lb.textContent = L.t('langSwitch'); lb.lang = K.ar() ? 'en' : 'ar';
+    const kb = K.$('#kbBtn'); kb.textContent = L.t('kbBtn'); kb.onclick = () => { K.$('#prefs').open = false; K.help(); };
     const db = K.$('#digitsBtn'); db.textContent = K.s.digits === 'arab' ? L.t('digitsLatn') : L.t('digitsArab'); db.setAttribute('aria-label', `${L.t('digits')}: ${db.textContent}`);
     const who = K.$('#who');
     if (Auth.mode === 'oidc') who.innerHTML = `${K.ic('user')} ${esc(Auth.me.name)} <button id="outBtn" type="button">${esc(L.t('signOut'))}</button>`, K.$('#outBtn').onclick = Auth.logout;
@@ -58,7 +62,8 @@
     }
     if (my !== seq) return;
     if (K.bell) K.bell();
-    view.innerHTML = out.html; document.title = `${out.title} · ${L.t('app')}`;
+    if (route.name === 'home' && K.tour) K.tour();
+    view.innerHTML = out.html; document.title = `${out.title} · ${K.appName || L.t('app')}`;
     out.after?.(view);
     if (keepScroll) window.scrollTo(0, y); else { window.scrollTo(0, 0); const h = K.$('#h'); if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); } }
   };

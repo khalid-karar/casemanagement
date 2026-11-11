@@ -235,3 +235,8 @@ details.filters[open]>summary{margin-bottom:10px}
 }
 .trend tbody tr{grid-template-columns:150px 1fr 1fr}.trend th{font-weight:400;font-size:.85rem;white-space:nowrap}
 .trend td,.trend th{padding:1px 6px}
+
+.bulk{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:8px 12px;background:#eef1f7;border-radius:8px;margin-block-end:8px}
+.bulk[hidden]{display:none}.tbl td.sel{width:34px}
+.kb{display:grid;grid-template-columns:auto 1fr;gap:6px 16px}.kb kbd{background:#eef1f7;border:1px solid #c5cbd8;border-radius:4px;padding:1px 7px;font-family:inherit}
+.tour-n{color:#4b5563;font-size:.86rem}

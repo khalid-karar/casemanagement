@@ -45,7 +45,7 @@
     const assignCard = `<section class="card" aria-labelledby="as-h"><h3 id="as-h">${esc(L.t('assignee'))}</h3><p>${c.assignee ? `<b>${esc(K.who(c.assignee.id))}</b>` : `<span class="mute">${esc(L.t('noAssignee'))}</span>`}</p>${open ? `<div class="row">${c.assignee?.id !== me.id ? `<button class="secondary sm" id="assignMe">${esc(L.t('assignToMe'))}</button>` : ''}${people.length ? `<label class="sr-only" for="asel">${esc(L.t('assignTo'))}</label><select id="asel"><option value="">${esc(L.t('assignTo'))}…</option>${people.map((u) => `<option value="${esc(u.id)}">${esc(u.name)}</option>`).join('')}</select>` : `<label class="sr-only" for="asel">${esc(L.t('assignTo'))}</label><input id="asel" placeholder="${esc(L.t('assignTo'))}">`}</div>` : ''}</section>`;
     const canHold = me.roles.includes('legal_counsel');
     const holdCard = c.legalHold || canHold ? `<section class="card" aria-labelledby="lh-h"><h3 id="lh-h">${esc(L.t('legalHold'))}</h3>${c.legalHold ? `<div class="banner warn">${K.ic('lock')}<div><b>${esc(L.t('holdActive'))}</b><br>${esc(c.legalHold.reason ?? '')} · ${K.time(c.legalHold.placedAt)}</div></div>` : `<p class="mute">${esc(L.t('none'))}</p>`}${canHold ? `<button class="secondary sm" id="hold">${esc(c.legalHold ? L.t('holdRelease') : L.t('holdPlace'))}</button>` : ''}</section>` : '';
-    const partiesCard = c.parties.length ? `<section class="card" aria-labelledby="pt-h"><h3 id="pt-h">${esc(L.t('parties'))}</h3><ul class="list">${c.parties.map((p) => `<li><span class="badge">${esc(L.party(p.role))}</span><span class="t">${p.personId === '[REDACTED]' ? `<span class="badge">${K.ic('lock')} ${esc(L.t('sealed'))}</span>` : esc(p.personId)}</span></li>`).join('')}</ul></section>` : '';
+    const partiesCard = c.parties.length ? `<section class="card" aria-labelledby="pt-h"><h3 id="pt-h">${esc(L.t('parties'))}</h3><ul class="list">${c.parties.map((p) => `<li><span class="badge">${esc(L.party(p.role))}</span><span class="t">${p.personId === '[REDACTED]' ? `<span class="badge">${K.ic('lock')} ${esc(L.t('sealed'))}</span>` : `<a href="#/person/${encodeURIComponent(p.personId)}">${esc(K.who(p.personId))}</a>`}</span></li>`).join('')}</ul></section>` : '';
     const slaTone = { ON_TRACK: ['ok', 'slaOn'], AT_RISK: ['warn', 'slaRisk'], BREACHED: ['bad', 'slaBreach'] };
     const dlRows = [];
     if (dl.sla) { const [tone, lbl] = slaTone[dl.sla.status]; dlRows.push(`<li class="row top"><div class="t"><b>${esc(L.t('slaTarget'))}</b><div class="mute">${esc(L.state(def, dl.sla.state))}</div></div><div class="end"><span class="badge ${tone}">${esc(L.t(lbl))}</span><div class="mute"><time datetime="${esc(dl.sla.dueAt)}" title="${esc(K.dateTime(dl.sla.dueAt))}">${esc(K.dateBoth(dl.sla.dueAt))} · ${esc(K.rel(dl.sla.dueAt))}</time></div></div></li>`); }
@@ -56,11 +56,13 @@
       dlRows.push(`<li class="row top"><div class="t"><b>${esc(L.lab(k.label))}</b><div class="mute">${esc(L.t('clockBasis'))}: ${esc(k.legalBasis)}</div></div><div class="end"><span class="badge ${tone}">${esc(L.t(lbl))}</span>${k.dueAt ? `<div class="mute"><time datetime="${esc(k.dueAt)}">${esc(K.dateBoth(k.dueAt))} · ${esc(K.rel(k.dueAt))}</time></div>` : ''}</div></li>`);
     }
     const deadlineCard = dlRows.length ? `<section class="card" aria-labelledby="dl-h"><div class="card-h">${K.ic('clock')}<h3 id="dl-h">${esc(L.t('deadlineT'))}</h3></div><ul class="list">${dlRows.join('')}</ul></section>` : '';
-    const overview = `<div class="grid g2"><div>${deadlineCard}${stepsCard}${apprCard}${assignCard}${holdCard}</div><div>${detailsCard}${partiesCard}</div></div>`;
+    const rel = (await K.api('GET', base + '/related')).j?.items ?? [];
+    const relCard = `<section class="card" aria-labelledby="rl-h"><div class="card-h"><h3 id="rl-h">${esc(L.t('relatedT'))}</h3><span class="spacer"></span>${open ? `<button class="secondary sm" id="linkCase">${K.ic('plus')} ${esc(L.t('linkCase'))}</button>` : ''}</div>${rel.length ? `<ul class="list">${rel.map((r) => `<li><span class="badge">${esc(L.t('rel' + r.relation))}</span><span class="t">${r.caseId ? `<a class="row-link" href="#/cases/${encodeURIComponent(r.caseId)}">${esc(r.summary?.title ?? r.caseId)}</a><div class="mute"><span class="code">${esc(r.caseId)}</span> · ${esc(L.state(K.s.defs[r.summary.caseTypeKey], r.summary.state))} · ${esc(L.t(r.direction === 'out' ? 'dirOut' : 'dirIn'))}</div>` : `<span class="mute">${K.ic('lock')} ${esc(L.t('restrictedCase'))}</span>`}</span></li>`).join('')}</ul>` : `<p class="mute">${esc(L.t('noRelated'))}</p>`}</section>`;
+    const overview = `<div class="grid g2"><div>${deadlineCard}${stepsCard}${apprCard}${assignCard}${holdCard}</div><div>${detailsCard}${partiesCard}${relCard}</div></div>`;
 
     // ---- Documents ----------------------------------------------------------------------------
     const types = def.artifactTypes ?? [];
-    const docs = c.artifacts.filter((a) => !a.type.startsWith('najiz_status') && a.type !== 'note');
+    const docs = c.artifacts.filter((a) => !a.type.startsWith('najiz_status') && a.type !== 'note' && a.type !== 'link');
     const notes = c.artifacts.filter((a) => a.type === 'note').sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     const canNote = c.access?.canNote !== false;
     const others = (K.s.people || []).filter((p) => p.id !== me.id);
@@ -116,6 +118,11 @@
       const post = async (path, body, okMsg) => { const res = await K.api('POST', path, body); if (K.report(res, okMsg)) await reload(); return res; };
       K.$$('[data-act]', root).forEach((b) => (b.onclick = async () => { const res = await K.api('POST', `${base}/transitions/${b.dataset.act}`); if (K.report(res, L.t('stepDone'))) reload(); }));
       K.$$('[data-appr]', root).forEach((b) => (b.onclick = () => post(`${base}/approvals`, { role: b.dataset.appr }, L.t('approve_ok'))));
+      const lc = K.$('#linkCase', root);
+      if (lc) lc.onclick = async () => {
+        const r = await K.dialog({ title: L.t('linkCase'), ok: L.t('save'), body: `<div class="field"><label for="lt">${esc(L.t('linkTarget'))}</label><input id="lt" name="t" required maxlength="80" autofocus></div><div class="field"><label for="lr">${esc(L.t('linkRel'))}</label><select id="lr" name="r">${['RELATED', 'DUPLICATE', 'PARENT', 'CHILD', 'FOLLOW_UP'].map((x) => `<option value="${x}">${esc(L.t('rel' + x))}</option>`).join('')}</select></div>` });
+        if (!r.ok) return; const res = await K.api('POST', `${base}/links`, { targetId: r.data.t.trim(), relation: r.data.r }); if (K.report(res, L.t('linkSaved'))) reload();
+      };
       const dp = K.$('#doPrint', root); if (dp) dp.onclick = () => window.print();
       const nf = K.$('#nf', root);
       if (nf) {
