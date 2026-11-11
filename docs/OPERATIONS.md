@@ -42,3 +42,14 @@ Assignment safety: when a case is assigned, the server looks the assignee up in 
 
 ## Exports and printing
 `GET /cases/export.csv` takes the list filters, returns summaries only (no sealed or personal values), at most 5,000 rows, with spreadsheet-formula cells neutralised. The printable case file is `#/cases/<id>/file` (browser Print / Save as PDF).
+
+
+## Anonymous reporting: gateway rules (required before it is offered to a client)
+
+The public routes are `/public/*` and `/r/*`. The application stores no address, user agent or cookie for them and keeps its limiter keys as a daily-rotating salted hash in memory only. **The gateway in front must do the same:**
+
+- Do not write access logs with client addresses, user agents or full URLs (the token is in the path) for `/public/*` and `/r/*`, or write them without the address and keep them short. If the gateway cannot, do not promise a client that reports are anonymous.
+- Put a WAF / bot rule and a per-address rate limit in front of `/public/*`. The application's own limits are a second line.
+- Set `TRUSTED_PROXY_HOPS` to the number of proxies in front of the app so the limiter sees the real address (default 0 = the direct connection). Set `APP_URL` to the public address so printed QR codes point to the right host.
+- Do not add third-party scripts, analytics or fonts to `/r/*`. The page's content-security policy forbids them.
+- Stale-report reminders run with the deadline alerts (every 15 minutes). A report waiting more than three days for staff produces one reminder.

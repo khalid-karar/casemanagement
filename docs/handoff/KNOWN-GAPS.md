@@ -45,8 +45,26 @@ Each has an automated test (`test/qa-matrix.test.ts`, `test/roles.test.ts`, `tes
 
 ## K. Round 4 (notes, notifications, reports, intake)
 - Keyboard-shortcut and tour wording, and the placeholder brand name and logo, need the owner's decision.
-- Intake form is for staff recording a report received from someone else; a self-service employee portal needs a role decision (employees currently have no create right).
+- The staff intake form is for recording a report received from someone else. The employee-facing route is now **Report & Track** (section L), which needs no role because the reporter never signs in.
 - Related-case links are one-directional records shown from both sides; removing a link is not supported (append-only by design).
 - Mentions use a picker, not as-you-type suggestions.
 - CSV export is not itself audited per download.
 - Hotline operators, SOC 2 / ISO 27001 certification and HRIS connectors are out of scope for the code.
+
+## L. Report & Track (anonymous reporting) and board pack: please attack and test
+
+**Decision taken:** employees do not get case-creation rights. Instead a reporter reaches the organisation through a printed QR code or link, with no account, and the report lands in an inbox, not in the case system. An **ethics officer** (and only an ethics officer) triages it: reply, dismiss with a reason, or convert it into a case. See `docs/REPORT-AND-TRACK.md` for the design.
+
+Known limits, stated so they are not reported as surprises:
+
+- **A lost reference code cannot be recovered.** Only its hash is stored, so nobody, including us, can reissue it. The page says so before and after the code is shown. The reporter files a new report.
+- **Anonymity is not guaranteed against the reporter's own behaviour.** Timing, the site printed on the poster (a place with few people), writing style and specific details can identify a reporter. The page warns about this; the system stores no address, user agent or cookie.
+- **The reverse proxy / gateway must not log client addresses on `/public/*` and `/r/*`.** The application cannot enforce this. See `docs/OPERATIONS.md`. Until a client's gateway is configured this way, the anonymity claim must not be made to that client.
+- **Channel flood.** Each channel accepts a fixed number of new reports per hour (default 200), and each source address a few per hour. Exhausting a channel's cap by rotating addresses can keep real reporters out for the rest of the hour. That is an accepted trade; the real control is the gateway's WAF and bot protection. Limiter keys are a daily-rotating salted hash held in memory only.
+- **No recusal.** An ethics officer who is the subject of a report can still read it. A second officer, or a recusal flag, is a decision for the client.
+- **Reads by staff are not recorded.** The report history records messages, conversion and dismissal, not who opened it.
+- **An ethics officer converts only into departments they belong to.** The convert action uses the officer's own department claims; converting into Security needs a matching claim.
+- **The notification and e-mail for a report carry a report number and the kind of event, no content.** Staff who have never signed in are not notified.
+- **Not built (deliberately):** voice or hotline intake (needs an in-Kingdom speech-to-text provider; the report model is ready for a transcript), SSO/HRIS sync (Keycloak covers SSO; HRIS is per client), a policy library with attestation, ISO 27001 / SOC 2 (calendar time, not code).
+- **Evidence folders** are a label chosen at upload (a person or a topic). Moving an existing document to another folder is not supported, because evidence is append-only.
+- **Board pack** covers the cases the requester may read and says so. It holds counts, rates and averages only. Substantiation rate counts only closed cases whose outcome the requester may see.

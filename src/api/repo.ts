@@ -1,5 +1,5 @@
-import { appendEvent, verifyChain } from '../engine';
-import type { Actor, AuditEvent, AuditEventInput, CaseState } from '../engine';
+import { appendEvent, staffSummary, verifyChain } from '../engine';
+import type { Actor, AuditEvent, AuditEventInput, CaseState, Report, StaffReportSummary } from '../engine';
 import { LegalLibrary } from '../legal';
 import type { RevocationStore } from './revocation';
 import type { KeyStore, TenantKey } from '../security/crypto';
@@ -26,19 +26,47 @@ export interface Tx {
   getAudit(caseId: string): Promise<AuditEvent[]>;
 }
 
+/**
+ * A QR code on a poster at a site. The token in its URL is the only thing an unauthenticated reporter presents, and it
+ * does one job: say which organisation (and which place) this report is for. It is not a secret — it is printed in
+ * public — so it is stored in clear, which lets an administrator reprint the poster.
+ */
+export interface ReportChannel {
+  id: string; tenantId: string; token: string; label: { ar: string; en: string }; active: boolean; createdAt: string; createdBy: string;
+}
+export const CHANNEL_TOKEN = /^[A-Za-z0-9_-]{22}$/;
+
+/** One tenant-scoped transaction over reports. It deliberately exposes nothing about cases, so the public routes cannot reach them. */
+export interface ReportTx {
+  get(id: string, lock?: boolean): Promise<Report | undefined>;
+  /** For the reporter: finds their report from the hash of the code they presented. Locks the row. */
+  getByCodeHash(codeHash: string): Promise<Report | undefined>;
+  /** Inbox rows. Reads columns only: no message is read or decrypted to draw a list. */
+  list(filter?: { status?: Report['status'] }): Promise<StaffReportSummary[]>;
+  /** create=true inserts (fails if the id or code already exists); otherwise updates. */
+  save(r: Report, create?: boolean): Promise<void>;
+}
+export interface ReportStore {
+  reportTx<T>(tenantId: string, fn: (tx: ReportTx) => Promise<T>): Promise<T>;
+  /** The one lookup that needs no tenant. Returns undefined for an unknown token; never lists. */
+  channelByToken(token: string): Promise<ReportChannel | undefined>;
+  listChannels(tenantId: string): Promise<ReportChannel[]>;
+  saveChannel(c: ReportChannel): Promise<void>;
+}
+
 export interface Person {
   id: string; name: string; kind: string; tenantId: string; departments: string[]; roles: string[]; reportsTo: string[]; lastSeen: string;
   clearance?: 'STANDARD' | 'RESTRICTED' | 'PRIVILEGED'; email?: string | null; emailOptout?: boolean; counselMatterIds?: string[];
 }
 
-export type NotificationKind = 'ASSIGNED' | 'MENTIONED' | 'STATE_CHANGED' | 'SLA_RISK' | 'SLA_BREACH' | 'ACTION_DUE';
+export type NotificationKind = 'ASSIGNED' | 'MENTIONED' | 'STATE_CHANGED' | 'SLA_RISK' | 'SLA_BREACH' | 'ACTION_DUE' | 'REPORT_NEW' | 'REPORT_REPLY' | 'REPORT_STALE';
 /** Says that something happened on a case, never what is inside it. */
 export interface Notification {
   id: string; tenantId: string; userId: string; kind: NotificationKind; caseId: string; actorId?: string | null;
   dedupeKey?: string | null; createdAt: string; readAt?: string | null; emailedAt?: string | null;
 }
 
-export interface Repo extends KeyStore, RevocationStore {
+export interface Repo extends KeyStore, RevocationStore, ReportStore {
   /** Runs fn in a transaction bound to one tenant; row-level security applies in Postgres. */
   tx<T>(scope: Scope, fn: (tx: Tx) => Promise<T>): Promise<T>;
   /**
@@ -102,7 +130,10 @@ export class MemoryRepo implements Repo {
   async touchPerson(p: Person) { const k = `${p.tenantId}|${p.id}`; this.people.set(k, { ...p, emailOptout: this.people.get(k)?.emailOptout ?? false }); }
   async listPeople(t: string) { return [...this.people.values()].filter((p) => p.tenantId === t).sort((a, b) => a.name.localeCompare(b.name)); }
   private locks = new Set<string>();
-  async listTenants() { return [...new Set([...this.cases.values()].map((c) => c.tenantId))].sort(); }
+  async listTenants() {
+    // Tenants that have only set up a reporting channel and received nothing yet still need their stale-report sweep.
+    return [...new Set([...[...this.cases.values()].map((c) => c.tenantId), ...[...this.channels.values()].map((c) => c.tenantId)])].sort();
+  }
   async withLock(name: string, fn: () => Promise<void>) { if (this.locks.has(name)) return false; this.locks.add(name); try { await fn(); return true; } finally { this.locks.delete(name); } }
   private keys = new Map<string, TenantKey[]>();
   async getTenantKeys(t: string) { return [...(this.keys.get(t) ?? [])].sort((a, b) => a.version - b.version); }
@@ -116,6 +147,44 @@ export class MemoryRepo implements Repo {
   async logAi(t: string, e: AiLogEntry) { this.aiLog.set(t, [...(this.aiLog.get(t) ?? []), e]); }
   async listAiLog(t: string, limit: number) { return (this.aiLog.get(t) ?? []).slice(-limit).reverse(); }
   private k = (t: string, id: string) => `${t}\u0000${id}`;
+
+  // ---- Report & Track ----
+  private reports = new Map<string, Report>();
+  private channels = new Map<string, ReportChannel>(); // by token
+  private rchain: Promise<unknown> = Promise.resolve();
+  async reportTx<T>(tenantId: string, fn: (tx: ReportTx) => Promise<T>): Promise<T> {
+    const self = this;
+    const run = this.rchain.then(() => fn({
+      async get(id) { return self.reports.get(self.k(tenantId, id)); },
+      async getByCodeHash(h) { return [...self.reports.values()].find((r) => r.tenantId === tenantId && r.codeHash === h); },
+      async list(f) {
+        return [...self.reports.values()].filter((r) => r.tenantId === tenantId && (!f?.status || r.status === f.status))
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(staffSummary);
+      },
+      async save(r, create) {
+        if (r.tenantId !== tenantId) throw new Error('TENANT_MISMATCH');
+        const key = self.k(tenantId, r.id);
+        if (create && (self.reports.has(key) || [...self.reports.values()].some((x) => x.tenantId === tenantId && x.codeHash === r.codeHash))) throw new Error('REPORT_EXISTS');
+        // The database trigger's rule, kept here so tests on the memory repo cannot pass where Postgres would refuse.
+        const old = self.reports.get(key);
+        if (!create && !old) throw new Error('REPORT_NOT_FOUND');
+        if (old) {
+          if (old.codeHash !== r.codeHash || old.createdAt !== r.createdAt || old.channelId !== r.channelId) throw new Error('report identity is immutable');
+          if (r.events.length < old.events.length || old.events.some((e, i) => JSON.stringify(e) !== JSON.stringify(r.events[i]))) throw new Error('report history is append-only');
+        }
+        self.reports.set(key, r);
+      },
+    }));
+    this.rchain = run.catch(() => undefined);
+    return run;
+  }
+  async channelByToken(token: string) { const c = this.channels.get(token); return c && { ...c }; }
+  async listChannels(t: string) { return [...this.channels.values()].filter((c) => c.tenantId === t).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map((c) => ({ ...c })); }
+  async saveChannel(c: ReportChannel) {
+    const existing = this.channels.get(c.token);
+    if (existing && (existing.tenantId !== c.tenantId || existing.id !== c.id)) throw new Error('CHANNEL_TOKEN_EXISTS');
+    this.channels.set(c.token, { ...c });
+  }
 
   /** Transactions run one at a time, like Postgres row locks (`FOR UPDATE`) make two writers on one case take turns. */
   private chain: Promise<unknown> = Promise.resolve();

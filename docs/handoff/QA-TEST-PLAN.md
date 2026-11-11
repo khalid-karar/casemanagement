@@ -253,3 +253,20 @@ Already listed in KNOWN-GAPS? (which id):
 - Bulk assign: includes a case where the chosen assignee has a conflict of interest (must be reported as failed).
 - Confidential report intake (`#/report`): anonymous option stores no reporter name; audit log still shows who entered it.
 - Shortcuts `/`, `g h`, `g c`, `g i`, `n`, `?`; first-visit tour (once per person per browser).
+
+
+## L. Report & Track, evidence folders, board report (new)
+
+Set up: as `a-admin`, create a channel under Reports inbox; print or open its link on a phone. Ethics officer is `a-ethics`; `a-hr-mgr` and `a-admin` must NOT see the inbox.
+
+1. **File a report with no sign-in** on a phone in Arabic and in English. The code appears once with copy and save. Reload the page: the code is gone and nothing is stored in the browser (no cookies, local storage or session storage).
+2. **Follow up** with the code typed in lower case, with spaces, with Arabic-Indic digits, and with `O`/`0`, `I`/`1` confusion: all open the report. A wrong code and a wrong link give the same message.
+3. **Two-way thread:** as `a-ethics` reply; the reporter sees "Ethics team" and no name. The reporter replies; the officer's list shows "waiting for a reply".
+4. **Who sees what:** `a-hr-mgr`, `a-admin`, `a-sec-mgr`, and another client's ethics officer get refused (403 or 404). Nothing in the reporter's view names a person, case number or category chosen by staff.
+5. **Convert:** the case opens with channel "Portal (anonymous)", the report shows the case link, the reporter sees only "accepted". Converting twice is refused. A report cannot be dismissed after conversion.
+6. **Dismiss** needs a reason; the reporter sees "closed"; a reply from the reporter reopens it.
+7. **Channels:** create, print the poster, turn off (the link then answers as if it never existed), turn on. A non-admin cannot.
+8. **Limits:** file six reports quickly from one device (429 with a wait time on the sixth). Send a 300 KB body (413). Send text shorter than 10 characters (rejected, nothing saved).
+9. **Notifications:** the ethics officer gets a bell and e-mail for a new report and for a reply; the text names no content. After three days without an answer, a "waiting" reminder arrives once.
+10. **Evidence folders:** upload two documents with the same folder name and one with none; the Documents tab groups them. Try a folder name with `<script>`, control characters, or 500 characters.
+11. **Board report:** open as `a-hr-mgr` (case figures), as `a-ethics` (adds report counts). Change the period; export CSV and open it in a spreadsheet: no formulas run, no case numbers or names appear. As `a-sec-mgr` the HR figures must be absent.

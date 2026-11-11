@@ -35,6 +35,8 @@ const deny = (reason: string): Decision => ({ allowed: false, reason });
 
 export function canAccess(actor: Actor, res: ResourceRef, action: Action): Decision {
   if (actor.tenantId !== res.tenantId) return deny('TENANT_MISMATCH');
+  // An anonymous reporter has no standing on any case, whatever else is set on the object.
+  if (actor.kind === 'reporter') return deny('REPORTER_HAS_NO_CASE_ACCESS');
   if (actor.kind === 'ai' && action !== 'read') return deny('AI_READ_ONLY');
 
   if (actor.kind === 'external') {

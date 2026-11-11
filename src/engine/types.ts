@@ -161,7 +161,12 @@ export type CaseTypeInput = z.input<typeof CaseTypeDefinition>;
 // Runtime state
 // ---------------------------------------------------------------------------
 
-export type ActorKind = 'human' | 'ai' | 'system' | 'external';
+/**
+ * 'reporter' is a person who submitted through the anonymous Report & Track channel. It appears only in a
+ * report's own history. A reporter never holds a session or an Actor, so it can never be minted from a
+ * token (oidc.ts maps every claim other than 'external' to 'human'), and canAccess refuses it outright.
+ */
+export type ActorKind = 'human' | 'ai' | 'system' | 'external' | 'reporter';
 
 export interface Actor {
   id: string;

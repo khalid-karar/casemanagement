@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { createApp } from './app';
+import { addressFrom } from './public-reports';
 import { najizFromEnv } from '../najiz/registry';
 import { Directory } from './auth';
 import { OidcAuthenticator } from './oidc';
@@ -91,7 +92,10 @@ if (authMode === 'oidc') {
   authInfo = { mode: 'oidc', issuer, clientId };
 }
 const najiz = najizFromEnv(process.env);
-const app = createApp({ repo, directory: authn, authInfo, revocations, ...(verifyLogoutToken ? { verifyLogoutToken } : {}), ...(najiz ? { najiz } : {}), ...(provider ? { provider } : {}), ...(inKingdom ? { inKingdom } : {}), ...(paidOcr ? { paidOcr } : {}) });
+// How many reverse proxies sit in front of this process (0 = clients connect directly). Only used to read the address the
+// anonymous-report limiter hashes; the address is never stored or logged.
+const trustedProxyHops = Number(process.env.TRUSTED_PROXY_HOPS ?? 0);
+const app = createApp({ ...(process.env.APP_URL ? { appUrl: process.env.APP_URL } : {}), publicReports: { address: (c) => addressFrom(c, trustedProxyHops) }, repo, directory: authn, authInfo, revocations, ...(verifyLogoutToken ? { verifyLogoutToken } : {}), ...(najiz ? { najiz } : {}), ...(provider ? { provider } : {}), ...(inKingdom ? { inKingdom } : {}), ...(paidOcr ? { paidOcr } : {}) });
 
 // Background jobs: each runs on one server at a time and is safe to repeat.
 const jobs: Job[] = [];
@@ -114,6 +118,8 @@ jobs.push({ name: 'mail-outbox', everyMs: 60_000, run: () => sendPendingMail(rep
 jobs.push({ name: 'deadline-alerts', everyMs: Number(process.env.ALERT_MINUTES ?? 15) * 60_000, run: () => deadlineAlerts(repo, new Date().toISOString()) });
 new Scheduler(repo, jobs).start();
 
+// A QR code opens /r/<token>: one static page that reads the token from its own address.
+app.get('/r/:token', serveStatic({ path: './web/report.html' }));
 app.use('/*', serveStatic({ root: './web' }));
 const port = Number(process.env.PORT ?? 3000);
 serve({ fetch: app.fetch, port });

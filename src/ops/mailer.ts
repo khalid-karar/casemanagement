@@ -26,15 +26,20 @@ const WHAT: Record<string, [string, string]> = {
   SLA_RISK: ['A case is close to its target date', 'قضية يقترب موعدها المستهدف'],
   SLA_BREACH: ['A case has passed its target date', 'قضية تجاوزت موعدها المستهدف'],
   ACTION_DUE: ['A corrective action is due', 'إجراء تصحيحي يستحق قريبًا'],
+  REPORT_NEW: ['A new report is waiting in the reports inbox', 'بلاغ جديد في صندوق البلاغات'],
+  REPORT_REPLY: ['A reporter has replied to a report', 'ردّ مُبلِّغ على بلاغه'],
+  REPORT_STALE: ['A report has been waiting for a response', 'بلاغ ينتظر ردًّا'],
 };
 
 /** Bilingual, content-free: the case number and a link. Everything else stays behind sign-in. */
 export function composeMail(n: Notification, p: Person, appUrl: string): Mail {
   const [en, ar] = WHAT[n.kind] ?? ['A case needs your attention', 'قضية تحتاج إلى انتباهك'];
-  const link = `${appUrl.replace(/\/$/, '')}/#/cases/${encodeURIComponent(n.caseId)}`;
+  const isReport = n.kind.startsWith('REPORT_');
+  const link = `${appUrl.replace(/\/$/, '')}/#/${isReport ? 'reports' : 'cases'}/${encodeURIComponent(n.caseId)}`;
+  const [noAr, noEn] = isReport ? ['رقم البلاغ', 'Report'] : ['رقم القضية', 'Case'];
   return {
-    to: p.email!, subject: `${ar} · ${en} (${n.caseId})`,
-    text: `${ar}\nرقم القضية: ${n.caseId}\n${link}\n\n${en}\nCase: ${n.caseId}\n${link}\n\nلا تتضمن هذه الرسالة تفاصيل القضية؛ سجّل الدخول لعرضها.\nThis message contains no case details; sign in to view them.`,
+    to: p.email!, subject: `${ar} · ${en}${isReport ? '' : ` (${n.caseId})`}`,
+    text: `${ar}\n${noAr}: ${n.caseId}\n${link}\n\n${en}\n${noEn}: ${n.caseId}\n${link}\n\nلا تتضمن هذه الرسالة تفاصيل القضية؛ سجّل الدخول لعرضها.\nThis message contains no case details; sign in to view them.`,
   };
 }
 

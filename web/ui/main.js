@@ -8,12 +8,13 @@
     const query = new URLSearchParams(q);
     if (!seg.length) return { name: 'home', params: [], query };
     if (seg[0] === 'cases' && seg[1]) return { name: 'case', params: [seg[1], seg[2]], query };
+    if (seg[0] === 'reports' && seg[1]) return { name: 'reports', params: [seg[1]], query };
     if (seg[0] === 'person' && seg[1]) return { name: 'person', params: [decodeURIComponent(seg[1])], query };
-    return { name: ['cases', 'laws', 'ai', 'review', 'people', 'inbox', 'report'].includes(seg[0]) ? seg[0] : 'home', params: [], query };
+    return { name: ['cases', 'laws', 'ai', 'review', 'people', 'inbox', 'report', 'reports', 'board'].includes(seg[0]) ? seg[0] : 'home', params: [], query };
   };
   K.go = (path) => { if (('#' + path) === location.hash) K.render(); else location.hash = path; };
   const isBack = () => K.s.me?.tenantId === 'platform';
-  const navItems = () => (isBack() ? [['/review', 'navReview', 'scale', 'review'], ['/laws', 'navLaws', 'scale', 'laws']] : [['/', 'navHome', 'home', 'home'], ['/cases', 'navCases', 'folder', 'cases'], ['/laws', 'navLaws', 'scale', 'laws'], ['/ai', 'navAi', 'spark', 'ai'], ['/report', 'navReport', 'shield', 'report'], ...(K.s.me?.roles?.includes('tenant_admin') ? [['/people', 'navPeople', 'user', 'people']] : [])]);
+  const navItems = () => (isBack() ? [['/review', 'navReview', 'scale', 'review'], ['/laws', 'navLaws', 'scale', 'laws']] : [['/', 'navHome', 'home', 'home'], ['/cases', 'navCases', 'folder', 'cases'], ['/laws', 'navLaws', 'scale', 'laws'], ['/ai', 'navAi', 'spark', 'ai'], ['/report', 'navReport', 'shield', 'report'], ['/board', 'navBoard', 'list', 'board'], ...(K.s.me?.roles?.includes('ethics_officer') || K.s.me?.roles?.includes('tenant_admin') ? [['/reports', 'navReports', 'inbox', 'reports']] : []), ...(K.s.me?.roles?.includes('tenant_admin') ? [['/people', 'navPeople', 'user', 'people']] : [])]);
 
   function chrome(route) {
     const doc = document.documentElement;

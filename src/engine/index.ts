@@ -10,3 +10,4 @@ export * from './sla';
 export * from './legalhold';
 export * from './amendment';
 export * from './referral';
+export * from './report';

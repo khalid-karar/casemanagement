@@ -2,6 +2,10 @@ import { SAUDI_CALENDAR, slaForCase } from '../engine';
 import { CASE_TYPES } from '../case-types';
 import type { Repo } from '../api/repo';
 import { makeNotifier } from '../api/notify';
+import { notifyTriagers } from '../api/report-notify';
+
+/** A reporter who wrote last and has had no answer for this long is waiting on someone. */
+export const REPORT_STALE_DAYS = 3;
 
 /**
  * Deadline alerts. Run on a schedule; each alert is sent once (a dedupe key per case, step and status), so running it
@@ -15,6 +19,11 @@ export async function deadlineAlerts(repo: Repo, nowIso: string) {
   for (const tenantId of await repo.listTenants()) {
     const people = await repo.listPeople(tenantId);
     const byId = new Map(people.map((p) => [p.id, p]));
+    // Reports waiting on staff. The list reads columns only, so no message is opened to decide this.
+    for (const r of await repo.reportTx(tenantId, (tx) => tx.list({ status: 'UNTRIAGED' }))) {
+      if (!r.awaitingStaff || (Date.parse(nowIso) - Date.parse(r.updatedAt)) / 86400000 < REPORT_STALE_DAYS) continue;
+      sent += await notifyTriagers(repo, people, tenantId, 'REPORT_STALE', r.id, `rep:${r.id}:stale:${r.updatedAt}`, nowIso);
+    }
     const cases = await repo.tx(tenantId, (tx) => tx.listCases()); // trusted internal pass: tenant isolation only
     for (const cs of cases) {
       const def = CASE_TYPES[cs.caseTypeKey]; if (!def) continue;

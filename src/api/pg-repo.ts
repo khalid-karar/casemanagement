@@ -1,11 +1,11 @@
 import pg from 'pg';
-import { appendEvent, verifyChain } from '../engine';
-import type { AuditEvent, AuditEventInput, CaseState } from '../engine';
+import { appendEvent, staffSummary, verifyChain } from '../engine';
+import type { AuditEvent, AuditEventInput, CaseState, Report, StaffReportSummary } from '../engine';
 import { LegalLibrary } from '../legal';
 import type { Instrument, InstrumentVersion, RuleBinding } from '../legal';
 import type { Proposal } from '../legal';
 import { tenantOf } from './repo';
-import type { AiLogEntry, CaseDocument, Notification, Person, Repo, Scope, Tx } from './repo';
+import type { AiLogEntry, CaseDocument, Notification, Person, ReportChannel, ReportTx, Repo, Scope, Tx } from './repo';
 import type { AiSettings } from '../ai/consent';
 import { defaultSettings } from '../ai/consent';
 
@@ -232,6 +232,82 @@ export class PgRepo implements Repo {
   listAiLog(tenantId: string, limit: number) {
     return this.run(tenantId, async (c) =>
       (await c.query('SELECT at, actor_id, type, data FROM ai_log WHERE tenant_id = $1 ORDER BY id DESC LIMIT $2', [tenantId, limit])).rows.map((r) => ({ at: r.at, actorId: r.actor_id, type: r.type, data: r.data })));
+  }
+
+  // ---- Report & Track -------------------------------------------------------
+  /**
+   * The unauthenticated lookup: no tenant, only the token the caller presented. The row-level policy lets exactly the row
+   * with that token be read and nothing else, so even a bug here cannot list channels or reveal other tenants.
+   */
+  private async runChannelLookup<T>(token: string, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> {
+    const c = await this.pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query("SELECT set_config('app.tenant_id', '', true), set_config('app.channel_token', $1, true)", [token]);
+      const out = await fn(c);
+      await c.query('COMMIT');
+      return out;
+    } catch (e) {
+      await c.query('ROLLBACK').catch(() => {});
+      throw e;
+    } finally {
+      c.release();
+    }
+  }
+  private channelRow = (r: any): ReportChannel => ({ id: r.id, tenantId: r.tenant_id, token: r.token, label: r.label, active: r.active, createdAt: r.created_at, createdBy: r.created_by });
+
+  channelByToken(token: string) {
+    return this.runChannelLookup(token, async (c) => {
+      const r = await c.query('SELECT * FROM report_channels WHERE token = $1', [token]);
+      return r.rows[0] ? this.channelRow(r.rows[0]) : undefined;
+    });
+  }
+  listChannels(tenantId: string) {
+    return this.run(tenantId, async (c) => (await c.query('SELECT * FROM report_channels WHERE tenant_id = $1 ORDER BY created_at', [tenantId])).rows.map(this.channelRow));
+  }
+  saveChannel(ch: ReportChannel) {
+    return this.run(ch.tenantId, async (c) => {
+      await c.query('INSERT INTO tenant_registry (tenant_id, created_at) VALUES ($1, $2) ON CONFLICT DO NOTHING', [ch.tenantId, ch.createdAt]);
+      await c.query(
+        'INSERT INTO report_channels (tenant_id,id,token,label,active,created_at,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (tenant_id, id) DO UPDATE SET label = EXCLUDED.label, active = EXCLUDED.active',
+        [ch.tenantId, ch.id, ch.token, JSON.stringify(ch.label), ch.active, ch.createdAt, ch.createdBy]);
+    });
+  }
+
+  reportTx<T>(tenantId: string, fn: (tx: ReportTx) => Promise<T>): Promise<T> {
+    return this.run(tenantId, (c) => fn({
+      async get(id, lock) {
+        const r = await c.query(`SELECT data FROM reports WHERE tenant_id = $1 AND id = $2${lock ? ' FOR UPDATE' : ''}`, [tenantId, id]);
+        return r.rows[0]?.data as Report | undefined;
+      },
+      async getByCodeHash(codeHash) {
+        const r = await c.query('SELECT data FROM reports WHERE tenant_id = $1 AND code_hash = $2 FOR UPDATE', [tenantId, codeHash]);
+        return r.rows[0]?.data as Report | undefined;
+      },
+      async list(filter) {
+        const r = await c.query(
+          `SELECT id,status,category,language,channel_id,created_at,updated_at,message_count,awaiting_staff,case_id FROM reports WHERE tenant_id = $1${filter?.status ? ' AND status = $2' : ''} ORDER BY updated_at DESC LIMIT 1000`,
+          filter?.status ? [tenantId, filter.status] : [tenantId]);
+        return r.rows.map((x): StaffReportSummary => ({
+          id: x.id, status: x.status, category: x.category, language: x.language, channelId: x.channel_id, createdAt: x.created_at, updatedAt: x.updated_at,
+          messageCount: x.message_count, awaitingStaff: x.awaiting_staff, ...(x.case_id ? { caseId: x.case_id } : {}),
+        }));
+      },
+      async save(rep, create) {
+        if (rep.tenantId !== tenantId) throw new Error('TENANT_MISMATCH');
+        const s = staffSummary(rep);
+        if (create) {
+          await c.query('INSERT INTO reports (tenant_id,id,channel_id,code_hash,status,category,language,message_count,awaiting_staff,case_id,created_at,updated_at,data) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
+            [tenantId, rep.id, rep.channelId, rep.codeHash, rep.status, rep.category, rep.language, s.messageCount, s.awaitingStaff, rep.caseId ?? null, rep.createdAt, rep.updatedAt, JSON.stringify(rep)]);
+        } else {
+          // Identity (channel, code hash, created_at) never changes: it is not in the SET list, and it is part of the match,
+          // so a save carrying a different identity updates nothing instead of leaving the JSON and the columns disagreeing.
+          const u = await c.query('UPDATE reports SET status=$3, category=$4, language=$5, message_count=$6, awaiting_staff=$7, case_id=$8, updated_at=$9, data=$10 WHERE tenant_id=$1 AND id=$2 AND code_hash=$11 AND channel_id=$12 AND created_at=$13',
+            [tenantId, rep.id, rep.status, rep.category, rep.language, s.messageCount, s.awaitingStaff, rep.caseId ?? null, rep.updatedAt, JSON.stringify(rep), rep.codeHash, rep.channelId, rep.createdAt]);
+          if (u.rowCount !== 1) throw new Error('REPORT_NOT_FOUND_OR_IDENTITY_CHANGED');
+        }
+      },
+    }));
   }
 
   verifyChain(e: AuditEvent[]) { return verifyChain(e); }

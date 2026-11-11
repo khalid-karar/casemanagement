@@ -1,6 +1,6 @@
-import type { Amendment, Artifact, AuditEvent, CaseState, CorrectiveAction } from '../engine';
+import type { Amendment, Artifact, AuditEvent, CaseState, CorrectiveAction, Report } from '../engine';
 import { tenantOf } from '../api/repo';
-import type { CaseDocument, Repo, Scope, Tx } from '../api/repo';
+import type { CaseDocument, ReportTx, Repo, Scope, Tx } from '../api/repo';
 import { CASE_TYPES } from '../case-types';
 import { DataCrypto, type TenantKey } from './crypto';
 
@@ -78,6 +78,37 @@ export class EncryptedRepo implements Repo {
     const d = await this.inner.getCaseDocument(sc, caseId, sha256);
     return d ? { ...d, bytes: await this.dc.decryptBytes(t, `doc|${caseId}|${d.sha256}`, d.bytes) } : undefined;
   }
+
+  /**
+   * Reports. Every message text and the closing note are encrypted on every save, unconditionally and with an explicit
+   * `sealed` marker, never by sniffing the text for a ciphertext prefix: the text is written by an anonymous stranger,
+   * and a report that merely began with the prefix would otherwise be stored in clear and then fail to open. The history
+   * and the inbox columns hold digests and counts only, so they stay readable. Each ciphertext is bound to its report
+   * and message number, so swapping two messages' ciphertext fails to decrypt instead of showing the wrong words.
+   */
+  async sealReport(r: Report): Promise<Report> {
+    const t = r.tenantId;
+    const messages = await Promise.all(r.messages.map(async (m) => ({ ...m, text: await this.dc.encryptValue(t, `report|${r.id}|msg|${m.n}`, m.text) })));
+    const { closingNote, ...rest } = r;
+    return { ...rest, messages, ...(closingNote !== undefined ? { closingNote: await this.dc.encryptValue(t, `report|${r.id}|note`, closingNote) } : {}), sealed: true };
+  }
+  async openReport(r: Report): Promise<Report> {
+    if (!r.sealed) return r; // stored before encryption was switched on
+    const t = r.tenantId;
+    const messages = await Promise.all(r.messages.map(async (m) => ({ ...m, text: String(await this.dc.decryptValue(t, `report|${r.id}|msg|${m.n}`, m.text)) })));
+    const { closingNote, sealed: _sealed, ...rest } = r;
+    return { ...rest, messages, ...(closingNote !== undefined ? { closingNote: String(await this.dc.decryptValue(t, `report|${r.id}|note`, closingNote)) } : {}) };
+  }
+  reportTx: Repo['reportTx'] = (tenantId, fn) => this.inner.reportTx(tenantId, (tx) => fn({
+    get: async (id, lock) => { const r = await tx.get(id, lock); return r ? this.openReport(r) : undefined; },
+    getByCodeHash: async (h) => { const r = await tx.getByCodeHash(h); return r ? this.openReport(r) : undefined; },
+    list: (f) => tx.list(f),
+    save: async (r, create) => tx.save(await this.sealReport(r), create),
+  } satisfies ReportTx));
+  // Channels hold a label and a public token, nothing sensitive.
+  channelByToken: Repo['channelByToken'] = (t) => this.inner.channelByToken(t);
+  listChannels: Repo['listChannels'] = (t) => this.inner.listChannels(t);
+  saveChannel: Repo['saveChannel'] = (c) => this.inner.saveChannel(c);
 
   lib: Repo['lib'] = (t, m, fn) => this.inner.lib(t, m, fn);
   putFile: Repo['putFile'] = (t, f) => this.inner.putFile(t, f);

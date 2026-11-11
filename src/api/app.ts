@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { randomBytes, randomUUID } from 'node:crypto';
+import QRCode from 'qrcode';
 import { bodyLimit } from 'hono/body-limit';
 import {
   AccessDeniedError, ConflictOfInterestError, FieldError, TransitionBlockedError, addArtifact, addAction, amendCase, applyTransition,
@@ -24,6 +26,12 @@ import { dashboard as buildDashboard, search as searchCases, toCsv } from './sum
 import { NajizError } from '../najiz/types';
 import { syncCase } from '../najiz/sync';
 import { makeNotifier, personToActor } from './notify';
+import { boardCsv, boardReport } from './board';
+import { publicReports } from './public-reports';
+import type { PublicLimits } from './public-reports';
+import { notifyTriagers } from './report-notify';
+import { CHANNEL_TOKEN } from './repo';
+import { canTriageReports, convertReport, dismissReport, staffReply, staffView, verifyReport } from '../engine';
 import { summarise } from './summary';
 import type { NajizRegistry } from '../najiz/types';
 import { NajizRuleError, approverOf, currentApprovals, assertMaySubmit, importUpdates, najizState, pendingArtifact, planPacket, reconcile, resolution } from '../najiz/workflow';
@@ -53,6 +61,10 @@ export interface AppDeps {
   limits?: { perMinute?: number; heavyPerMinute?: number };
   /** Largest JSON body in bytes (default 1 MB). File uploads have their own cap. */
   maxJsonBytes?: number;
+  /** Anonymous Report & Track. `address` reads the caller's network address (only ever hashed, in memory, with a daily salt). */
+  /** Public address of the web app, used in the QR codes printed for report channels. Defaults to the address of the request. */
+  appUrl?: string;
+  publicReports?: { limits?: Partial<PublicLimits>; address?: (c: any) => string | undefined };
 }
 type Env = { Variables: { user: Principal; lang: 'ar' | 'en' } };
 
@@ -72,7 +84,7 @@ const T = {
 const pickLang = (q: string | undefined, h: string | undefined): 'ar' | 'en' =>
   q === 'en' || (!q && /^en/i.test(h ?? '')) ? 'en' : 'ar';
 
-const STATIC = new Set(['/', '/index.html', '/auth.js', '/brand.js', '/style.css', '/favicon.ico', '/auth/config']);
+const STATIC = new Set(['/', '/index.html', '/auth.js', '/brand.js', '/style.css', '/report.css', '/favicon.ico', '/auth/config']);
 
 export function createApp(deps: AppDeps) {
   const { repo, directory, paidOcr } = deps;
@@ -117,7 +129,8 @@ export function createApp(deps: AppDeps) {
     const idp = deps.authInfo?.issuer ? new URL(deps.authInfo.issuer).origin : '';
     c.header('content-security-policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ${idp}; frame-ancestors 'none'; base-uri 'none'; form-action 'self' ${idp}`.replace(/\s+;/g, ';'));
     c.header('cache-control', 'no-store');
-    if (c.req.path === '/health' || c.req.path === '/auth/backchannel-logout' || STATIC.has(c.req.path) || /^\/ui\/[a-z0-9-]+\.js$/.test(c.req.path)) return next();
+    if (c.req.path.startsWith('/r/') || c.req.path === '/report.html') c.header('x-robots-tag', 'noindex, nofollow, noarchive');
+    if (c.req.path === '/health' || c.req.path === '/auth/backchannel-logout' || c.req.path.startsWith('/public/') || c.req.path.startsWith('/r/') || c.req.path === '/report.html' || STATIC.has(c.req.path) || /^\/ui\/[a-z0-9-]+\.js$/.test(c.req.path)) return next();
     const user = await directory.resolve(c.req.header('authorization'));
     if (!user) return c.json({ error: 'UNAUTHENTICATED', message: T.unauthenticated[c.get('lang')] }, 401);
     c.set('user', user);
@@ -392,6 +405,128 @@ export function createApp(deps: AppDeps) {
   });
 
   // ---- Notifications (own only). A notification names an event on a case; it holds no case content.
+  // ---- Report & Track. The anonymous side lives in public-reports.ts and can reach reports and channels only.
+  app.route('/public', publicReports({
+    store: repo, now,
+    ...(deps.publicReports?.address ? { address: deps.publicReports.address } : {}),
+    ...(deps.publicReports?.limits ? { limits: deps.publicReports.limits } : {}),
+    onEvent: async (e) => {
+      const people = await peopleOf(e.tenantId);
+      await notifyTriagers(repo, people, e.tenantId, e.kind, e.reportId, e.kind === 'REPORT_NEW' ? `rep:${e.reportId}:new` : `rep:${e.reportId}:reply:${e.n}`, now());
+    },
+  }));
+
+  // The staff side. Only an ethics officer: not a department head, not a tenant administrator.
+  const triager = (c: any) => {
+    const u = c.get('user') as Principal;
+    if (u.tenantId === 'platform' || !canTriageReports(u)) throw new AccessDeniedError('ROLE_REQUIRED:ethics_officer');
+    return u;
+  };
+  const REPORT_STATUSES = ['UNTRIAGED', 'CONVERTED', 'DISMISSED'] as const;
+  app.get('/reports', async (c) => {
+    const u = triager(c);
+    const st = c.req.query('status');
+    if (st !== undefined && !(REPORT_STATUSES as readonly string[]).includes(st)) return c.json({ error: 'INVALID_FIELDS' }, 400);
+    return c.json(await repo.reportTx(u.tenantId, (tx) => tx.list(st ? { status: st as (typeof REPORT_STATUSES)[number] } : undefined)));
+  });
+  const reportOr404 = async (c: any, u: Principal, mutateFn?: (r: any) => any | Promise<any>) => {
+    const out = await repo.reportTx(u.tenantId, async (tx) => {
+      const r = await tx.get(c.req.param('id'), Boolean(mutateFn));
+      if (!r) return undefined;
+      // A thread whose history does not verify is not shown or extended: fail closed and say so.
+      const ok = verifyReport(r);
+      if (!ok.valid) { console.error(`report integrity failure: ${ok.reason}`); return 'INTEGRITY' as const; }
+      if (!mutateFn) return r;
+      const next = await mutateFn(r); await tx.save(next); return next;
+    });
+    if (out === 'INTEGRITY') return c.json({ error: 'REPORT_INTEGRITY_FAILURE' }, 500);
+    return out ? c.json(staffView(out)) : nf(c);
+  };
+  app.get('/reports/:id', (c) => reportOr404(c, triager(c)));
+  app.post('/reports/:id/reply', async (c) => { const u = triager(c); const b = await c.req.json().catch(() => ({})); return reportOr404(c, u, (r) => staffReply(r, b?.text, u, now())); });
+  app.post('/reports/:id/dismiss', async (c) => { const u = triager(c); const b = await c.req.json().catch(() => ({})); return reportOr404(c, u, (r) => dismissReport(r, b?.note, u, now())); });
+
+  // Accepting a report opens a case and links the two. The officer chooses what from the report goes into the case; nothing is copied automatically.
+  app.post('/reports/:id/convert', async (c) => {
+    const u = triager(c);
+    const b = await c.req.json<{ caseType?: string; fields?: Record<string, unknown>; parties?: any[] }>().catch(() => ({} as { caseType?: string; fields?: Record<string, unknown>; parties?: any[] }));
+    const def = b.caseType ? CASE_TYPES[b.caseType] : undefined;
+    if (!def) return c.json({ error: 'UNKNOWN_CASE_TYPE' }, 400);
+    const rid = c.req.param('id');
+    const r = await repo.reportTx(u.tenantId, (tx) => tx.get(rid));
+    if (!r) return nf(c);
+    if (r.status === 'CONVERTED') return c.json({ error: 'REPORT_ALREADY_CONVERTED' }, 409);
+    // Derived from the report, so a retry after a failure lands on the same case instead of opening a second one.
+    const prefix = { HR: 'HR', SECURITY: 'SEC', AUDIT: 'AUD', LEGAL: 'LEG' }[def.domain] ?? 'CS';
+    const caseId = `${prefix}-R-${rid.replace(/-/g, '').slice(0, 10).toUpperCase()}`;
+    const fields = { ...(b.fields ?? {}) };
+    if (def.fields.some((f) => f.key === 'reporterChannel') && fields['reporterChannel'] === undefined) fields['reporterChannel'] = 'ANONYMOUS_PORTAL';
+    const known = new Map((await peopleOf(u.tenantId)).map((p) => [p.id, p]));
+    const parties = (b.parties ?? []).map((p) => (p && known.has(p.personId) ? { ...p, reportsTo: known.get(p.personId)!.reportsTo } : p));
+    const m = createCase(def, { id: caseId, fields, parties }, u, now());
+    try { await repo.tx(u, (tx) => tx.saveCase(m.case, m.event, true)); }
+    catch (e) { if (!((e as { code?: string }).code === '23505' || (e as Error).message === 'CASE_EXISTS')) throw e; }
+    const out = await repo.reportTx(u.tenantId, async (tx) => {
+      const cur = await tx.get(rid, true);
+      if (!cur) return undefined;
+      const next = convertReport(cur, caseId, u, now()); await tx.save(next); return next;
+    });
+    return out ? c.json({ ...staffView(out), caseId }) : nf(c);
+  });
+
+  // ---- Board pack: counts, rates and averages for senior management. No names, no case details; limited to what the requester may read.
+  app.get('/board-report', async (c) => {
+    const user = c.get('user');
+    if (user.tenantId === 'platform') throw new AccessDeniedError('TENANT_REQUIRED');
+    const iso = /^\d{4}-\d{2}-\d{2}$/;
+    const today = now().slice(0, 10);
+    const to = c.req.query('to') ?? today;
+    const from = c.req.query('from') ?? new Date(Date.parse(`${to}T00:00:00Z`) - 89 * 86400000).toISOString().slice(0, 10);
+    if (!iso.test(from) || !iso.test(to) || Number.isNaN(Date.parse(from)) || Number.isNaN(Date.parse(to)) || from > to || Date.parse(to) - Date.parse(from) > 800 * 86400000) return c.json({ error: 'INVALID_FIELDS' }, 400);
+    const all = await repo.tx(user, (tx) => tx.listCases());
+    const report = boardReport(all, user, CASE_TYPES, now(), { from, to });
+    // Report volumes are visible only to the people who triage reports, the same audience as the inbox.
+    if (canTriageReports(user)) {
+      const list = await repo.reportTx(user.tenantId, (tx) => tx.list());
+      const inRange = list.filter((r) => r.createdAt.slice(0, 10) >= from && r.createdAt.slice(0, 10) <= to);
+      report.reports = { received: inRange.length, awaitingTriage: list.filter((r) => r.status === 'UNTRIAGED').length };
+    }
+    if (c.req.query('format') === 'csv') return new Response(boardCsv(report), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': `attachment; filename="board-report-${from}_${to}.csv"`, 'cache-control': 'no-store' } });
+    return c.json(report);
+  });
+
+  // ---- Report channels (the QR codes). Administrators only. The token is printed in public, so it is shown again on request.
+  const channelAdmin = (c: any) => {
+    const u = c.get('user') as Principal;
+    if (u.tenantId === 'platform' || !u.roles.includes('tenant_admin')) throw new AccessDeniedError('ROLE_REQUIRED:tenant_admin');
+    return u;
+  };
+  const channelOut = async (c: any, ch: { id: string; token: string; label: { ar: string; en: string }; active: boolean; createdAt: string }) => {
+    const path = `/r/${ch.token}`;
+    const url = `${(deps.appUrl ?? new URL(c.req.url).origin).replace(/\/$/, '')}${path}`;
+    return { id: ch.id, label: ch.label, active: ch.active, createdAt: ch.createdAt, token: ch.token, path, url, qr: await QRCode.toString(url, { type: 'svg', margin: 2, errorCorrectionLevel: 'M' }) };
+  };
+  app.get('/report-channels', async (c) => c.json(await Promise.all((await repo.listChannels(channelAdmin(c).tenantId)).map((ch) => channelOut(c, ch)))));
+  app.post('/report-channels', async (c) => {
+    const u = channelAdmin(c);
+    const b = await c.req.json<{ labelAr?: unknown; labelEn?: unknown }>().catch(() => ({} as { labelAr?: unknown; labelEn?: unknown }));
+    const ok = (v: unknown): v is string => typeof v === 'string' && v.trim().length >= 2 && v.trim().length <= 120;
+    if (!ok(b.labelAr) || !ok(b.labelEn)) return c.json({ error: 'INVALID_FIELDS' }, 400);
+    const ch = { id: randomUUID(), tenantId: u.tenantId, token: randomBytes(16).toString('base64url'), label: { ar: b.labelAr.trim(), en: b.labelEn.trim() }, active: true, createdAt: now(), createdBy: u.id };
+    if (!CHANNEL_TOKEN.test(ch.token)) throw new Error('token shape');
+    await repo.saveChannel(ch);
+    return c.json(await channelOut(c, ch), 201);
+  });
+  app.patch('/report-channels/:id', async (c) => {
+    const u = channelAdmin(c);
+    const b = await c.req.json<{ active?: unknown }>().catch(() => ({} as { active?: unknown }));
+    if (typeof b.active !== 'boolean') return c.json({ error: 'INVALID_FIELDS' }, 400);
+    const ch = (await repo.listChannels(u.tenantId)).find((x) => x.id === c.req.param('id'));
+    if (!ch) return nf(c);
+    await repo.saveChannel({ ...ch, active: b.active });
+    return c.json(await channelOut(c, { ...ch, active: b.active }));
+  });
+
   app.get('/notifications', async (c) => {
     const user = c.get('user'); if (user.tenantId === 'platform') return c.json({ items: [], unread: 0 });
     const unreadOnly = c.req.query('unread') === '1';
@@ -456,6 +591,9 @@ export function createApp(deps: AppDeps) {
     const form = await c.req.parseBody();
     const f = form['file'];
     const type = String(form['type'] ?? '');
+    // An optional folder (a person or a topic) to keep the evidence organised. It is a label only, never a path.
+    // eslint-disable-next-line no-control-regex
+    const folder = typeof form['folder'] === 'string' ? form['folder'].replace(/[\u0000-\u001f\u007f<>"]/g, '').replace(/\s+/g, ' ').trim().slice(0, 60) : '';
     if (!(f instanceof File) || !ARTIFACT_TYPE.test(type)) throw new FileError('NO_FILE');
     const bytes = new Uint8Array(await f.arrayBuffer());
     const d = describeUpload(bytes);
@@ -467,7 +605,7 @@ export function createApp(deps: AppDeps) {
     const out = await repo.tx(user, async (tx) => {
       const cs = await load(tx, caseId, user, 'write', true);
       if (!cs) return undefined;
-      const m = addArtifact(cs, { id: `${type}-${d.sha256.slice(0, 16)}`, type, hash: d.sha256, payload: { name, mime: d.mime, size: d.size } }, user, now());
+      const m = addArtifact(cs, { id: `${type}-${d.sha256.slice(0, 16)}`, type, hash: d.sha256, payload: { name, mime: d.mime, size: d.size, ...(folder ? { folder } : {}) } }, user, now());
       await tx.saveCase(m.case, m.event);
       return m.case;
     });
