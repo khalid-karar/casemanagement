@@ -16,7 +16,7 @@ import {
  *  - Audit assurance read-across: role audit_assurance may READ non-privileged cases elsewhere,
  *    always through field-level redaction (see redactForActor).
  */
-export type Action = 'read' | 'write' | 'transition' | 'refer' | 'export' | 'manage_hold';
+export type Action = 'read' | 'write' | 'transition' | 'refer' | 'export' | 'manage_hold' | 'amend';
 
 export interface ResourceRef {
   tenantId: string;
@@ -35,6 +35,8 @@ const deny = (reason: string): Decision => ({ allowed: false, reason });
 
 export function canAccess(actor: Actor, res: ResourceRef, action: Action): Decision {
   if (actor.tenantId !== res.tenantId) return deny('TENANT_MISMATCH');
+  // An anonymous reporter has no standing on any case, whatever else is set on the object.
+  if (actor.kind === 'reporter') return deny('REPORTER_HAS_NO_CASE_ACCESS');
   if (actor.kind === 'ai' && action !== 'read') return deny('AI_READ_ONLY');
 
   if (actor.kind === 'external') {
@@ -54,6 +56,10 @@ export function canAccess(actor: Actor, res: ResourceRef, action: Action): Decis
   if (res.confidentiality === 'PRIVILEGED' && !actor.departments.includes('LEGAL')) return deny('PRIVILEGE_WALL');
 
   if (action === 'manage_hold' && !actor.roles.includes('legal_counsel')) return deny('ROLE_REQUIRED:legal_counsel');
+  // Correcting a closed record is an accountable act, not ordinary case work.
+  if (action === 'amend' && !(actor.roles.includes('case_manager') || actor.roles.includes('legal_counsel'))) {
+    return deny('ROLE_REQUIRED:case_manager');
+  }
   if (action === 'export' && !(actor.roles.includes('case_manager') || actor.roles.includes('legal_counsel'))) {
     return deny('ROLE_REQUIRED:case_manager');
   }
@@ -85,5 +91,18 @@ export function redactForActor(def: CaseTypeDefinition, c: CaseState, actor: Act
     .filter((p) => !p.sealed || actor.roles.includes('ethics_officer'))
     .map((p) => (sees ? p : { ...p, personId: REDACTED, reportsTo: [] }));
 
-  return { ...c, fields, parties };
+  // An amendment carries the same value the field does, so it has to be masked the same way: a
+  // correction to a sealed field must not become a side channel around the seal.
+  // Keyed off the field DEFINITION, not off whether `fields` ended up masked: a sensitive field that
+  // was never set has no entry to mask, and its amendment would otherwise pass through in clear.
+  const amendments = c.amendments?.map((a) => {
+    const fd = def.fields.find((f) => f.key === a.field);
+    const hidden =
+      fd?.sensitivity === 'SEALED'
+        ? !actor.roles.some((r) => (def.sealedFieldRoles[a.field] ?? ['ethics_officer']).includes(r))
+        : fd?.sensitivity === 'PERSONAL' && !sees;
+    return hidden ? { ...a, originalValue: REDACTED, correctedValue: REDACTED } : a;
+  });
+
+  return { ...c, fields, parties, ...(amendments ? { amendments } : {}) };
 }

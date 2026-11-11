@@ -12,20 +12,30 @@
     "eval:ai": "echo 'eval harness not yet implemented'",
     "start": "tsx src/api/server.ts",
     "migrate": "tsx src/db/migrate.ts",
-    "start:dev": "AUTH_MODE=dev tsx src/api/server.ts"
+    "start:dev": "AUTH_MODE=dev tsx src/api/server.ts",
+    "seed": "tsx scripts/seed.mts",
+    "crypto": "tsx scripts/crypto-admin.mts",
+    "anchors": "tsx scripts/anchors.mts",
+    "gen:realm": "tsx scripts/gen-realm.mts deploy/keycloak/cms-realm.json",
+    "gen:realm:qa": "tsx scripts/gen-realm.mts deploy/keycloak/cms-realm-qa.json --qa"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.6",
     "hono": "^4.13.17",
     "jose": "^6.2.17",
     "mammoth": "^1.13.0",
+    "nodemailer": "^10.4.0",
     "pg": "^8.23.1",
+    "qrcode": "^1.5.4",
     "unpdf": "^2.1.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
+    "@types/qrcode": "^1.5.6",
+    "axe-core": "^4.14.0",
     "tsx": "^4.20.0",
     "typescript": "~5.9.0",
     "vitest": "^5.1.0"

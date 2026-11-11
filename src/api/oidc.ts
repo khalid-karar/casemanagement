@@ -13,6 +13,8 @@ export interface OidcConfig {
   /** Tests inject a key resolver; production uses the issuer's JWKS endpoint. */
   jwks?: JWTVerifyGetKey;
   allowInsecureIssuer?: boolean;
+  /** Rejects tokens issued before a person was revoked. */
+  revocations?: { isRevoked(subject: string, iat: number | undefined): boolean };
   clockToleranceSec?: number;
 }
 
@@ -20,9 +22,19 @@ const DEPARTMENTS = ['HR', 'SECURITY', 'AUDIT', 'LEGAL'] as const;
 const CLEARANCES = ['STANDARD', 'RESTRICTED', 'PRIVILEGED'] as const;
 const TENANT = /^[A-Za-z0-9][A-Za-z0-9_-]{1,63}$/;
 
-/** Every role the platform understands. Roles in a token that are not on this list are ignored. */
+/**
+ * Every role the platform understands. Roles in a token that are not on this list are ignored.
+ * The seed set holds the roles that grant permissions directly (see engine/permissions.ts) rather
+ * than appearing in a transition guard; the loop below adds every role a case type names.
+ * A role used by canAccess but missing here would be silently stripped from every token, so the
+ * capability would exist in dev mode and quietly not exist in production.
+ */
 export function knownRoles(): Set<string> {
-  const r = new Set<string>(['tenant_admin', 'ethics_officer', 'legal_counsel', 'general_counsel', 'legal_content_editor', 'legal_verifier', 'records_officer']);
+  const r = new Set<string>([
+    'tenant_admin', 'ethics_officer', 'legal_counsel', 'general_counsel', 'legal_content_editor', 'legal_verifier', 'records_officer',
+    'audit_assurance', // read-across: non-privileged cases in other departments, always redacted
+    'case_manager', // export
+  ]);
   for (const d of Object.values(CASE_TYPES)) {
     for (const t of d.transitions) for (const g of t.guards) {
       if (g.kind === 'role') g.anyOf.forEach((x) => r.add(x));
@@ -52,6 +64,7 @@ export function principalFromClaims(c: JWTPayload & Record<string, any>): Princi
   return {
     id: c.sub,
     name: first(c.name) ?? first(c.preferred_username) ?? c.sub,
+    ...(typeof c.email === 'string' && c.email_verified !== false && c.email.length < 255 && /^[^\s@]+@[^\s@]+$/.test(c.email) ? { email: c.email } : {}),
     kind,
     tenantId,
     departments: strArr(c.departments).filter((d): d is (typeof DEPARTMENTS)[number] => (DEPARTMENTS as readonly string[]).includes(d)),
@@ -84,9 +97,23 @@ export class OidcAuthenticator {
       // Access tokens only: refresh and ID tokens carry a different `typ`.
       if (payload.typ !== undefined && payload.typ !== 'Bearer') return undefined;
       if (typeof payload.azp !== 'string' || !this.cfg.allowedClients.includes(payload.azp)) return undefined;
+      if (this.cfg.revocations?.isRevoked(payload.sub!, payload.iat)) return undefined;
       return principalFromClaims(payload as JWTPayload & Record<string, unknown>);
     } catch {
       return undefined; // any verification failure is simply "not authenticated"
     }
+  }
+
+  /** OpenID back-channel logout: the identity provider tells us a person signed out. Returns the subject, or undefined if the token is not a valid logout token. */
+  async verifyLogoutToken(token: string): Promise<string | undefined> {
+    try {
+      const { payload } = await jwtVerify(token, this.keys, {
+        issuer: this.cfg.issuer, audience: this.cfg.allowedClients, algorithms: ['RS256', 'PS256', 'ES256'], clockTolerance: this.cfg.clockToleranceSec ?? 10, requiredClaims: ['iat', 'jti'],
+      });
+      const events = (payload as Record<string, any>)['events'];
+      if (!events || typeof events !== 'object' || !('http://schemas.openid.net/event/backchannel-logout' in events)) return undefined;
+      if ('nonce' in payload) return undefined; // logout tokens must not carry a nonce (spec), which also stops an ID token being replayed as one
+      return typeof payload.sub === 'string' && payload.sub ? payload.sub : undefined;
+    } catch { return undefined; }
   }
 }

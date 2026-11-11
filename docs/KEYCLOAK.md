@@ -2,6 +2,9 @@
 
 The API no longer trusts any user header in production. Every request carries a Keycloak access token (JWT); the API verifies it and builds the user from the token's claims.
 
+## Two realm files
+`deploy/keycloak/cms-realm.json` is the production realm: no users, TOTP enrolment forced, no password grant. `cms-realm-qa.json` (`pnpm gen:realm:qa`) is for the QA environment only: 22 test users from `src/api/test-users.ts`, TOTP not forced, and a `case-qa` client with password grant (the API must list it in `OIDC_ALLOWED_CLIENTS`; see `deploy/docker-compose.qa.yml`). Never import the QA realm into a real environment.
+
 ## What is checked on every request
 RS256/PS256/ES256 signature against the realm's JWKS (cached, rotated automatically); `iss` equals `OIDC_ISSUER`; `aud` contains `case-api`; `exp`/`nbf`; token type is an access token; `azp` is an allowed client (`case-web`). `alg=none` and shared-secret algorithms are rejected. Any failure is a plain 401.
 

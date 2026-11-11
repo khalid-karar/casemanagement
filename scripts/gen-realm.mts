@@ -1,7 +1,16 @@
 import { writeFileSync } from 'node:fs';
 import { knownRoles } from '../src/api/oidc';
+import { TEST_USERS } from '../src/api/test-users';
 
-const dev = process.argv.includes('--dev-users');
+/**
+ * `--qa` (alias: `--dev-users`) emits a SEPARATE realm for the QA environment: the same hardening,
+ * plus the test-user matrix from src/api/test-users.ts, TOTP enrolment not forced, and a
+ * `case-qa` client with direct password grants so API tests can get a token without a browser.
+ * The production realm (no users, TOTP mandatory, no password grant) is the default output and is
+ * what the penetration test must run against. Never import the QA realm into a real environment.
+ */
+const qa = process.argv.includes('--qa') || process.argv.includes('--dev-users');
+const QA_PASSWORD = 'Qa-Test-Only-Passw0rd!';
 const attrs = ['tenant_id', 'departments', 'clearance', 'reports_to', 'actor_kind', 'counsel_matter_ids'];
 const multi = new Set(['departments', 'reports_to', 'counsel_matter_ids']);
 const mapper = (a: string) => ({
@@ -18,22 +27,29 @@ const profile = {
     ...attrs.map((name) => ({ name, multivalued: multi.has(name), permissions: { view: ['admin'], edit: ['admin'] } })),
   ],
 };
-const users = !dev ? [] : [
-  ['hr-mgr', 'neom', ['HR'], ['hr_manager'], 'STANDARD'],
-  ['hr-inv', 'neom', ['HR'], ['hr_investigator'], 'STANDARD'],
-  ['hr-dir', 'neom', ['HR'], ['hr_director'], 'RESTRICTED'],
-  ['client-admin', 'neom', ['HR'], ['tenant_admin'], 'STANDARD'],
-  ['editor', 'platform', ['LEGAL'], ['legal_content_editor'], 'RESTRICTED'],
-  ['verifier', 'platform', ['LEGAL'], ['legal_verifier'], 'RESTRICTED'],
-].map(([u, tenant, deps, roles, clr]) => ({
-  username: u, email: `${u}@example.invalid`, firstName: String(u), lastName: 'Test', enabled: true, emailVerified: true,
-  attributes: { tenant_id: [tenant], departments: deps, clearance: [clr] },
-  credentials: [{ type: 'password', value: 'Test-Only-Passw0rd!', temporary: false }],
-  realmRoles: roles,
+const users = !qa ? [] : TEST_USERS.map((u) => ({
+  username: u.id, email: `${u.id}@example.invalid`, firstName: u.id, lastName: 'Test', enabled: true, emailVerified: true,
+  attributes: {
+    tenant_id: [u.tenantId], departments: u.departments, clearance: [u.clearance],
+    ...(u.kind === 'external' ? { actor_kind: ['external'] } : {}),
+    ...(u.counselMatterIds ? { counsel_matter_ids: u.counselMatterIds } : {}),
+  },
+  credentials: [{ type: 'password', value: QA_PASSWORD, temporary: false }],
+  realmRoles: u.roles,
 }));
 
+/** QA-only client: password grant, so test scripts can fetch a token without driving a browser. */
+const qaClient = {
+  clientId: 'case-qa', name: 'QA test client (non-production)', enabled: true, publicClient: true,
+  standardFlowEnabled: false, directAccessGrantsEnabled: true, implicitFlowEnabled: false, serviceAccountsEnabled: false,
+  protocolMappers: [
+    { name: 'audience', protocol: 'openid-connect', protocolMapper: 'oidc-audience-mapper', config: { 'included.custom.audience': 'case-api', 'access.token.claim': 'true', 'id.token.claim': 'false' } },
+    ...attrs.map(mapper),
+  ],
+};
+
 const realm = {
-  realm: 'cms', enabled: true, displayName: 'Case Management',
+  realm: 'cms', enabled: true, displayName: qa ? 'Case Management (QA — test data only)' : 'Case Management',
   sslRequired: 'external', registrationAllowed: false, resetPasswordAllowed: true, loginWithEmailAllowed: false, duplicateEmailsAllowed: false,
   bruteForceProtected: true, failureFactor: 5, maxFailureWaitSeconds: 900, permanentLockout: false,
   passwordPolicy: 'length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and passwordHistory(5)',
@@ -42,8 +58,9 @@ const realm = {
   internationalizationEnabled: true, supportedLocales: ['ar', 'en'], defaultLocale: 'ar',
   eventsEnabled: true, adminEventsEnabled: true, adminEventsDetailsEnabled: true, eventsExpiration: 31536000,
   otpPolicyType: 'totp', otpPolicyAlgorithm: 'HmacSHA256', otpPolicyDigits: 6, otpPolicyPeriod: 30,
-  // Multi-factor is mandatory for every user (NCA ECC). Dev users skip it so automated tests can sign in.
-  requiredActions: [{ alias: 'CONFIGURE_TOTP', name: 'Configure OTP', providerId: 'CONFIGURE_TOTP', enabled: true, defaultAction: !dev, priority: 10 }],
+  // Multi-factor is mandatory for every user (NCA ECC). QA users skip enrolment so tests can sign in;
+  // the penetration test runs against the production realm, where it is on.
+  requiredActions: [{ alias: 'CONFIGURE_TOTP', name: 'Configure OTP', providerId: 'CONFIGURE_TOTP', enabled: true, defaultAction: !qa, priority: 10 }],
   roles: { realm: [...knownRoles()].sort().map((name) => ({ name })) },
   clients: [{
     clientId: 'case-web', name: 'Case Management web app', enabled: true, publicClient: true, standardFlowEnabled: true,
@@ -55,9 +72,9 @@ const realm = {
       { name: 'audience', protocol: 'openid-connect', protocolMapper: 'oidc-audience-mapper', config: { 'included.custom.audience': 'case-api', 'access.token.claim': 'true', 'id.token.claim': 'false' } },
       ...attrs.map(mapper),
     ],
-  }],
+  }, ...(qa ? [qaClient] : [])],
   users,
   components: { 'org.keycloak.userprofile.UserProfileProvider': [{ providerId: 'declarative-user-profile', config: { 'kc.user.profile.config': [JSON.stringify(profile)] } }] },
 };
 writeFileSync(process.argv[2]!, JSON.stringify(realm, null, 2));
-console.log('wrote', process.argv[2]);
+console.log(`wrote ${process.argv[2]} (${qa ? `QA realm: ${users.length} test users, password ${QA_PASSWORD}, case-qa password grant` : 'production realm: no users, TOTP enrolment forced'})`);

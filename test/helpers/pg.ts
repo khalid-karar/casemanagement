@@ -19,7 +19,10 @@ export async function resetData() {
   await c.connect();
   await c.query('ALTER TABLE audit_events DISABLE TRIGGER audit_no_truncate');
   await c.query('ALTER TABLE ai_log DISABLE TRIGGER ai_log_no_truncate');
-  await c.query('TRUNCATE cases, audit_events, legal_instruments, legal_versions, legal_bindings, legal_proposals, legal_files, legal_log, tenant_ai_settings, ai_log');
+  await c.query('ALTER TABLE case_documents DISABLE TRIGGER case_documents_no_truncate');
+  await c.query('TRUNCATE case_documents');
+  await c.query('ALTER TABLE case_documents ENABLE TRIGGER case_documents_no_truncate');
+  await c.query('TRUNCATE cases, audit_events, legal_instruments, legal_versions, legal_bindings, legal_proposals, legal_files, legal_log, tenant_ai_settings, ai_log, tenant_keys, reports, report_channels, notifications');
   await c.query('ALTER TABLE audit_events ENABLE TRIGGER audit_no_truncate');
   await c.query('ALTER TABLE ai_log ENABLE TRIGGER ai_log_no_truncate');
   await c.end();

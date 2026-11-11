@@ -27,6 +27,24 @@ services:
       NODE_ENV: production
       OIDC_ISSUER: ${KC_HOSTNAME}/realms/cms
       DATABASE_URL: ${APP_DATABASE_URL:?cms_app role URL, see docs/DB-SETUP.md}
+      # Encryption at rest: the app refuses to start in production without a master key (docs/ENCRYPTION.md).
+      # Generate with `pnpm crypto gen-master k1`; keep it in your secret store, apart from database backups.
+      DATA_MASTER_KEYS: ${DATA_MASTER_KEYS:?see docs/ENCRYPTION.md}
+      DATA_MASTER_KEY_ID: ${DATA_MASTER_KEY_ID:?id of the master key used for new data keys}
+      ANCHOR_DIR: /anchors            # audit anchoring: point this volume at storage the app cannot rewrite (docs/OPERATIONS.md)
+    volumes: [anchors:/anchors]
     depends_on: [keycloak, db]
     ports: ["3000:3000"]
-volumes: { pgdata: {} }
+  # One-shot encrypted backup: `docker compose run --rm backup`. Uses the postgres:16 client so pg_dump matches the server.
+  backup:
+    image: postgres:16
+    profiles: [ops]
+    entrypoint: ["bash", "/scripts/backup.sh"]
+    environment:
+      DATABASE_ADMIN_URL: ${ADMIN_DATABASE_URL:?owner role URL}
+      BACKUP_DIR: /backups
+      BACKUP_PASSPHRASE_FILE: /run/secrets/backup_passphrase
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-30}
+    volumes: [../scripts:/scripts:ro, ./secrets/backup_passphrase:/run/secrets/backup_passphrase:ro, backups:/backups]
+    depends_on: [db]
+volumes: { pgdata: {}, anchors: {}, backups: {} }

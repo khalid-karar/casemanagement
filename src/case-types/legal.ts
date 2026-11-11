@@ -18,10 +18,14 @@ export const legalMatter = defineCaseType({
       label: { en: 'Forum', ar: 'جهة النظر' },
       type: 'enum',
       options: ['LABOUR_COURT', 'CRIMINAL_COURT', 'COMMERCIAL_COURT', 'BOARD_OF_GRIEVANCES', 'OTHER'],
+      // Once filed, none of these change by editing a field: they change by a new filing.
+      lockedFrom: 'FILED',
     },
-    { key: 'courtCaseNumber', label: { en: 'Court case number', ar: 'رقم القضية' }, type: 'text' },
-    { key: 'claimValueSar', label: { en: 'Claim value (SAR)', ar: 'قيمة المطالبة (ريال)' }, type: 'money' },
-    { key: 'opposingParty', label: { en: 'Opposing party', ar: 'الطرف الآخر' }, type: 'person', sensitivity: 'PERSONAL' },
+    // Comes back from Najiz on filing; it identifies the matter to the court from then on.
+    { key: 'courtCaseNumber', label: { en: 'Court case number', ar: 'رقم القضية' }, type: 'text', lockedFrom: 'FILED' },
+    // Claims are legitimately amended before judgment, so this stays open until the judgment lands.
+    { key: 'claimValueSar', label: { en: 'Claim value (SAR)', ar: 'قيمة المطالبة (ريال)' }, type: 'money', lockedFrom: 'JUDGMENT' },
+    { key: 'opposingParty', label: { en: 'Opposing party', ar: 'الطرف الآخر' }, type: 'person', sensitivity: 'PERSONAL', lockedFrom: 'FILED' },
   ],
   states: [
     { key: 'OPENED', label: { en: 'Opened', ar: 'مفتوحة' } },
