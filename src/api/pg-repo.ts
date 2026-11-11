@@ -5,7 +5,7 @@ import { LegalLibrary } from '../legal';
 import type { Instrument, InstrumentVersion, RuleBinding } from '../legal';
 import type { Proposal } from '../legal';
 import { tenantOf } from './repo';
-import type { AiLogEntry, CaseDocument, Repo, Scope, Tx } from './repo';
+import type { AiLogEntry, CaseDocument, Person, Repo, Scope, Tx } from './repo';
 import type { AiSettings } from '../ai/consent';
 import { defaultSettings } from '../ai/consent';
 
@@ -149,6 +149,16 @@ export class PgRepo implements Repo {
     });
   }
 
+  touchPerson(p: Person) {
+    return this.run(p.tenantId, async (c) => { await c.query(`INSERT INTO tenant_people (tenant_id,id,name,kind,departments,roles,reports_to,last_seen) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      ON CONFLICT (tenant_id,id) DO UPDATE SET name=EXCLUDED.name, kind=EXCLUDED.kind, departments=EXCLUDED.departments, roles=EXCLUDED.roles, reports_to=EXCLUDED.reports_to, last_seen=EXCLUDED.last_seen`,
+      [p.tenantId, p.id, p.name, p.kind, p.departments.join(','), p.roles.join(','), p.reportsTo.join(','), p.lastSeen]); });
+  }
+  listPeople(tenantId: string) {
+    const split = (s: string) => (s ? s.split(',') : []);
+    return this.run(tenantId, async (c) => (await c.query('SELECT * FROM tenant_people WHERE tenant_id=$1 ORDER BY name', [tenantId])).rows
+      .map((r): Person => ({ id: r.id, name: r.name, kind: r.kind, tenantId: r.tenant_id, departments: split(r.departments), roles: split(r.roles), reportsTo: split(r.reports_to), lastSeen: r.last_seen })));
+  }
   async listTenants() { return (await this.pool.query('SELECT tenant_id FROM tenant_registry ORDER BY 1')).rows.map((r) => r.tenant_id as string); }
   async withLock(name: string, fn: () => Promise<void>) {
     const c = await this.pool.connect();

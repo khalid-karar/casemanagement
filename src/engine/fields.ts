@@ -62,6 +62,7 @@ export function validateFields(def: CaseTypeDefinition, fields: Record<string, u
   for (const [k, v] of Object.entries(fields)) {
     const fd = byKey.get(k);
     if (!fd) { problems.push({ field: k, code: 'UNKNOWN_FIELD' }); continue; }
+    if (v === null) continue; // null means "clear this field" (edit) or "not provided" (create)
     const bad = check(fd, v);
     if (bad) problems.push({ field: k, code: bad });
   }
@@ -106,7 +107,7 @@ export function planFieldEdit(
       const has = existing !== undefined && existing !== null && existing !== '';
       if (has && !actor.roles.some((r) => allowed.includes(r))) { deniedSealed.push(k); continue; }
     }
-    next[k] = v;
+    if (v === null) delete next[k]; else next[k] = v;
     changes[k] = f.sensitivity === 'NORMAL'
       ? { from: c.fields[k] ?? null, to: v }
       : { fromSha256: digest(c.fields[k]), toSha256: digest(v) };

@@ -33,7 +33,7 @@ export interface AppDeps {
   /** Verifies an identity-provider logout token and returns the person it names. */
   verifyLogoutToken?: (token: string) => Promise<string | undefined>;
   /** Resolves a verified Principal from an Authorization header (dev Directory or OIDC). */
-  directory: { resolve(header: string | undefined): Principal | undefined | Promise<Principal | undefined> };
+  directory: { resolve(header: string | undefined): Principal | undefined | Promise<Principal | undefined>; all?(): Principal[] };
   /**
    * Public sign-in settings for the web app. In dev mode it also carries the demo user list that
    * fills the switcher, so the UI never holds its own copy of the test-user ids. Never populated
@@ -74,6 +74,22 @@ const STATIC = new Set(['/', '/index.html', '/auth.js', '/style.css', '/favicon.
 
 export function createApp(deps: AppDeps) {
   const { repo, directory, paidOcr } = deps;
+  // Remember who has signed in (names for the UI, assignable people, management chain). At most every 10 minutes per person.
+  const touched = new Map<string, number>();
+  const touchPerson = async (u: Principal) => {
+    if (u.tenantId === 'platform' || (u.kind !== 'human' && u.kind !== 'external')) return;
+    const k = `${u.tenantId}|${u.id}`; const n = Date.now();
+    if ((touched.get(k) ?? 0) > n - 600_000) return;
+    touched.set(k, n);
+    try { await repo.touchPerson({ id: u.id, name: u.name, kind: u.kind, tenantId: u.tenantId, departments: u.departments, roles: u.roles, reportsTo: u.reportsTo, lastSeen: new Date().toISOString() }); }
+    catch (e) { touched.delete(k); console.error('touchPerson failed', (e as Error).message); }
+  };
+  const peopleOf = async (tenantId: string) => {
+    const m = new Map((await repo.listPeople(tenantId)).map((p) => [p.id, p]));
+    for (const u of directory.all?.() ?? []) if (u.tenantId === tenantId && !m.has(u.id) && (u.kind === 'human' || u.kind === 'external'))
+      m.set(u.id, { id: u.id, name: u.name, kind: u.kind, tenantId, departments: u.departments, roles: u.roles, reportsTo: u.reportsTo, lastSeen: '' });
+    return [...m.values()].sort((a, b) => a.name.localeCompare(b.name));
+  };
   const providers: AiProviders = { ...(deps.provider ? { sovereign: deps.provider } : {}), ...(deps.inKingdom ? { inKingdom: deps.inKingdom } : {}) };
   const now = deps.clock ?? (() => new Date().toISOString());
   const app = new Hono<Env>();
@@ -102,6 +118,7 @@ export function createApp(deps: AppDeps) {
     const user = await directory.resolve(c.req.header('authorization'));
     if (!user) return c.json({ error: 'UNAUTHENTICATED', message: T.unauthenticated[c.get('lang')] }, 401);
     c.set('user', user);
+    void touchPerson(user);
     // Per-user limits, after sign-in so the key is the verified account, never a header the caller controls.
     const heavy = isHeavyRoute(c.req.method, c.req.path);
     const wait = limiter.take(`${heavy ? 'h' : 'g'}:${user.tenantId}:${user.id}`, { windowMs: 60_000, max: heavy ? heavyMax : generalMax });
@@ -145,6 +162,7 @@ export function createApp(deps: AppDeps) {
     if (!deps.revocations) return c.json({ error: 'NOT_ENABLED' }, 404);
     const b = await c.req.json<{ subject?: string }>().catch(() => ({} as { subject?: string }));
     if (!b.subject || typeof b.subject !== 'string' || b.subject.length > 200) return c.json({ error: 'INVALID_FIELDS' }, 400);
+    if (!(await peopleOf(user.tenantId)).some((x) => x.id === b.subject)) return c.json({ error: 'UNKNOWN_PERSON' }, 404); // only people of your own organisation
     await deps.revocations.revoke(b.subject);
     console.log(JSON.stringify({ event: 'sessions_revoked', by: user.id, tenant: user.tenantId, subject: b.subject }));
     return c.json({ ok: true });
@@ -153,6 +171,13 @@ export function createApp(deps: AppDeps) {
   app.get('/auth/config', (c) => c.json(deps.authInfo ?? { mode: 'dev' }));
   app.get('/me', (c) => { const u = c.get('user'); return c.json({ id: u.id, name: u.name, tenantId: u.tenantId, roles: u.roles, departments: u.departments, kind: u.kind, clearance: u.clearance }); });
   // Public liveness only. Capability details (OCR, paid OCR) need a platform sign-in.
+  // Names for ids, and who can be assigned. Roles and last sign-in are for tenant admins only.
+  app.get('/people', async (c) => {
+    const u = c.get('user'); if (u.tenantId === 'platform') return c.json([]);
+    const admin = u.roles.includes('tenant_admin');
+    return c.json((await peopleOf(u.tenantId)).map((p) => ({ id: p.id, name: p.name, kind: p.kind, departments: p.departments, ...(admin ? { roles: p.roles, lastSeen: p.lastSeen } : {}) })));
+  });
+
   app.get('/health', (c) => c.json({ ok: true }));
   app.get('/health/details', async (c) => {
     if (c.get('user').tenantId !== 'platform') return nf(c);
@@ -192,7 +217,10 @@ export function createApp(deps: AppDeps) {
     const gen = () => `${prefix}-${now().slice(0, 4)}-${Array.from(crypto.getRandomValues(new Uint8Array(6)), (x) => 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'[x % 31]).join('')}`;
     for (let attempt = 0; attempt < 5; attempt++) {
       const id = b.id || gen();
-      const m = createCase(def, { id, fields: b.fields ?? {}, parties: b.parties ?? [] }, user, now());
+      // For a party who is a known person, their management chain comes from the directory, not from the form.
+      const known = new Map((await peopleOf(user.tenantId)).map((p) => [p.id, p]));
+      const parties = (b.parties ?? []).map((p) => (p && known.has(p.personId) ? { ...p, reportsTo: known.get(p.personId)!.reportsTo } : p));
+      const m = createCase(def, { id, fields: b.fields ?? {}, parties }, user, now());
       try { await repo.tx(user, (tx) => tx.saveCase(m.case, m.event, true)); return c.json(view(m.case, user), 201); }
       catch (e) { if (b.id || !((e as { code?: string }).code === '23505' || (e as Error).message === 'CASE_EXISTS')) throw e; }
     }
@@ -264,7 +292,21 @@ export function createApp(deps: AppDeps) {
     };
   app.patch('/cases/:id/fields', mutate((cs, u, b) => setFields(cs, b, u, now(), CASE_TYPES[cs.caseTypeKey]!)));
   app.post('/cases/:id/artifacts', mutate((cs, u, b) => addArtifact(cs, b, u, now())));
-  app.post('/cases/:id/assignee', mutate((cs, u, b) => assignCase(cs, b, u, now())));
+  // The assignee is looked up server-side: the management chain used for conflict-of-interest checks must not come from the request.
+  app.post('/cases/:id/assignee', async (c) => {
+    const user = c.get('user');
+    const b = await c.req.json<{ id?: string }>().catch(() => ({} as { id?: string }));
+    const p = typeof b.id === 'string' ? (await peopleOf(user.tenantId)).find((x) => x.id === b.id) : undefined;
+    if (!p) return c.json({ error: 'UNKNOWN_ASSIGNEE', message: T.badRequest[c.get('lang')] }, 422);
+    const out = await repo.tx(user, async (tx) => {
+      const cs = await load(tx, c.req.param('id'), user, 'write', true);
+      if (!cs) return undefined;
+      const m = assignCase(cs, { id: p.id, reportsTo: p.reportsTo }, user, now());
+      await tx.saveCase(m.case, m.event);
+      return m.case;
+    });
+    return out ? c.json(view(out, user)) : nf(c);
+  });
   app.post('/cases/:id/actions', mutate((cs, u, b) => addAction(cs, b, u, now())));
   app.post('/cases/:id/actions/:aid/complete', mutate((cs, u, _b, c) => completeAction(cs, c.req.param('aid'), u, now())));
   app.post('/cases/:id/approvals', mutate((cs, u, b) => recordApproval(cs, b.role, u, now()), 'transition'));

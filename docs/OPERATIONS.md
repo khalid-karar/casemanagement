@@ -28,4 +28,6 @@ Point `ANCHOR_DIR` at storage the application account cannot rewrite (write-once
 Purge is **off**. No retention period is configured or enforced until counsel sets one; nothing deletes case data.
 
 ## Tenant administration (S14)
-Roles are assigned in Keycloak by platform staff; there is no tenant-admin role screen yet.
+Roles are assigned in Keycloak. Tenant admins have a **People & access** screen (`#/people`): everyone who has signed in, their departments and roles, last sign-in, and an *End sessions* button (immediate revocation, own organisation only). The list is built from sign-ins (table `tenant_people`), so a person appears after their first sign-in.
+
+Assignment safety: when a case is assigned, the server looks the assignee up in this list and uses the management chain from the identity provider (`reports_to` claim). The browser can no longer supply it, so a conflict of interest cannot be hidden by a crafted request. Parties who are known people get their chain from the same list.

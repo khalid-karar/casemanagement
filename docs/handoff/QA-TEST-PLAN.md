@@ -191,6 +191,10 @@ Run with `NAJIZ_MODE=simulated` (QA only). Every item names the account to use; 
 | J7 | Tenant admin calls `POST /admin/revoke-sessions` for a user | That user's earlier tokens are refused; other users unaffected |
 | J8 | `pnpm anchors verify <tenant>` after the anchor job has run; then edit one audit row as owner and repeat | OK first, then reports HISTORY_REWRITTEN |
 | J9 | Run `scripts/backup.sh`, restore into an empty database with `scripts/restore.sh` | Counts match; wrong passphrase and non-empty target refused |
+| J10 | As Client Admin open People & access; end sessions of another user | Dialog asks to confirm; that user's next request is refused; no button on your own row; screen not visible to other roles |
+| J11 | Assign a case to someone who manages the subject, sending `reportsTo: []` by hand | Still rejected (chain comes from the directory) |
+| J12 | Edit a case, empty a date or text field, save | Field is cleared and the audit trail shows the old value (sensitive fields: hash only) |
+| J13 | Phone width (390 px), Arabic and English | Main navigation is a bottom bar; case tabs wrap, no sideways scrolling of the page |
 
 ## Defect template
 

@@ -8,11 +8,11 @@
     const query = new URLSearchParams(q);
     if (!seg.length) return { name: 'home', params: [], query };
     if (seg[0] === 'cases' && seg[1]) return { name: 'case', params: [seg[1], seg[2]], query };
-    return { name: ['cases', 'laws', 'ai', 'review'].includes(seg[0]) ? seg[0] : 'home', params: [], query };
+    return { name: ['cases', 'laws', 'ai', 'review', 'people'].includes(seg[0]) ? seg[0] : 'home', params: [], query };
   };
   K.go = (path) => { if (('#' + path) === location.hash) K.render(); else location.hash = path; };
   const isBack = () => K.s.me?.tenantId === 'platform';
-  const navItems = () => (isBack() ? [['/review', 'navReview', 'scale', 'review'], ['/laws', 'navLaws', 'scale', 'laws']] : [['/', 'navHome', 'home', 'home'], ['/cases', 'navCases', 'folder', 'cases'], ['/laws', 'navLaws', 'scale', 'laws'], ['/ai', 'navAi', 'spark', 'ai']]);
+  const navItems = () => (isBack() ? [['/review', 'navReview', 'scale', 'review'], ['/laws', 'navLaws', 'scale', 'laws']] : [['/', 'navHome', 'home', 'home'], ['/cases', 'navCases', 'folder', 'cases'], ['/laws', 'navLaws', 'scale', 'laws'], ['/ai', 'navAi', 'spark', 'ai'], ...(K.s.me?.roles?.includes('tenant_admin') ? [['/people', 'navPeople', 'user', 'people']] : [])]);
 
   function chrome(route) {
     const doc = document.documentElement;
@@ -28,7 +28,7 @@
     else {
       const byT = Auth.users.reduce((m, u) => ((m[u.tenantId] ??= []).push(u), m), {});
       who.innerHTML = `<label>${esc(L.t('user'))} <select id="user">${Object.entries(byT).map(([t, us]) => `<optgroup label="${esc(t)}">${us.map((u) => `<option value="${esc(u.id)}" ${u.id === K.s.user ? 'selected' : ''}>${esc(u.id)} — ${esc(u.name)}</option>`).join('')}</optgroup>`).join('')}</select></label>`;
-      K.$('#user').onchange = (e) => { K.s.user = e.target.value; K.ls.set('user', K.s.user); K.s.me = null; location.hash = '/'; K.render(); };
+      K.$('#user').onchange = (e) => { K.s.user = e.target.value; K.ls.set('user', K.s.user); K.s.me = null; K.s.people = null; location.hash = '/'; K.render(); };
     }
   }
 
@@ -39,6 +39,8 @@
       const me = Auth.mode === 'oidc' ? Auth.me : (await K.api('GET', '/me')).j;
       if (!me?.id) { view.innerHTML = `<div class="empty">${K.ic('lock')}<p>${esc(L.t('e_401'))}</p></div>`; return; }
       K.s.me = me;
+      const pp = (await K.api('GET', '/people')).j; K.s.people = Array.isArray(pp) ? pp : [];
+      K.s.names = Object.fromEntries(K.s.people.map((u) => [u.id, u.name])); K.s.names[me.id] = me.name;
       K.s.defs = Object.fromEntries(((await K.api('GET', '/case-types')).j || []).map((d) => [d.key, d]));
     }
     const route = parse();

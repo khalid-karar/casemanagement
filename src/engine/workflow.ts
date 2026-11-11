@@ -230,7 +230,7 @@ export function createCase(
     state: def.initialState,
     stateEnteredAt: now,
     confidentiality: def.defaultConfidentiality,
-    fields: input.fields ?? {},
+    fields: Object.fromEntries(Object.entries(input.fields ?? {}).filter(([, v]) => v !== null)),
     parties: input.parties ?? [],
     artifacts: [],
     approvals: [],

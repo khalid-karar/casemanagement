@@ -54,6 +54,8 @@ window.CMS = window.CMS || {};
   };
 
   // ---- Dialog (native <dialog>: focus trap, Esc, inert background for free) ----------
+  /** A person's name for an id (falls back to the id itself when unknown, e.g. someone who has not signed in yet). */
+  K.who = (id) => (id && K.s.names?.[id]) || id || '';
   K.dialog = ({ title, body, ok, cancel, danger = false, hideCancel = false, onOpen }) => new Promise((resolve) => {
     const d = document.createElement('dialog');
     d.setAttribute('aria-labelledby', 'dlg-t');

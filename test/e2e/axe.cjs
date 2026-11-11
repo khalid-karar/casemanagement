@@ -17,9 +17,10 @@ const BASE = process.env.BASE_URL || 'http://localhost:3000';
   };
   const hr = [['/', '.stat'], ['/cases', '#results table, #results .empty'], ['/cases/HR-2026-001', '.stepper'], ['/cases/HR-2026-001/documents', '#upf'], ['/cases/HR-2026-001/actions', '#aaf'], ['/cases/HR-2026-001/history', '.timeline'], ['/laws', '#lawlist'], ['/ai', '#al']];
   for (const lang of ['ar', 'en']) {
-    await run('a-hr-mgr', lang, hr); await run('a-counsel', lang, [['/cases/m-1/najiz', '#panel .card']]); await run('p-verifier', lang, [['/review', '.card']]);
+    await run('a-hr-mgr', lang, hr); await run('a-counsel', lang, [['/cases/m-1/najiz', '#panel .card']]); await run('p-verifier', lang, [['/review', '.card']]); await run('a-admin', lang, [['/people', 'table.tbl']]);
   }
   await run('a-hr-mgr', 'ar', [['/', '.stat'], ['/cases', '#results table'], ['/cases/HR-2026-001', '.stepper']], { width: 390, height: 800 });
+  await run('a-admin', 'en', [['/people', 'table.tbl']], { width: 390, height: 800 });
   const keys = Object.keys(out); console.log(keys.length ? '' : 'NO VIOLATIONS');
   for (const k of keys) console.log(k, 'x' + out[k].length, '\n   ', out[k].slice(0, 2).join('\n    '));
   await b.close();

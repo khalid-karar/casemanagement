@@ -171,6 +171,19 @@ svg.i{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-widt
 .dir-ltr{direction:ltr;unicode-bidi:isolate;display:inline-block}
 .code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.86rem;direction:ltr;unicode-bidi:isolate;display:inline-block}
 pre{white-space:pre-wrap;background:#f3f1ea;padding:10px;border-radius:var(--r-sm)}
+.chip-s{display:inline-block;background:#eef1f7;color:var(--navy);border-radius:99px;padding:1px 9px;font-size:.84rem;margin:1px 0}
+/* Phones: the main navigation becomes a bottom bar (everything visible at once, thumb-reachable) and case tabs wrap instead of scrolling sideways. */
+@media (max-width:700px){
+  nav.main{position:fixed;inset-inline:0;bottom:0;z-index:50;border-bottom:0;border-top:1px solid var(--line);box-shadow:0 -2px 10px rgba(20,40,75,.08);padding-bottom:env(safe-area-inset-bottom)}
+  nav.main ul{padding:0;gap:0;overflow:visible;justify-content:stretch}
+  nav.main li{flex:1 1 0;min-width:0}
+  nav.main a,nav.main button{flex-direction:column;gap:2px;width:100%;padding:8px 2px 6px;font-size:.74rem;text-align:center;border-bottom:0;border-top:3px solid transparent;min-height:54px;justify-content:center}
+  nav.main [aria-current=page]{border-top-color:var(--gold)}
+  body{padding-bottom:72px}
+  .tabs{flex-wrap:wrap;overflow:visible;gap:0}
+  .tabs button{flex:1 1 30%;justify-content:center;padding-inline:6px}
+  .toasts,#toasts{bottom:80px}
+}
 @media print{header.top,nav.main,#toasts,button{display:none!important}body{background:#fff}.card{box-shadow:none}}
 .bar-r{text-decoration:none;color:inherit}.bar-r:hover span:first-child{text-decoration:underline}
 .stat{text-decoration:none}
